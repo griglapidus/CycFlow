@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
-#ifndef CYC_ASYNC_RECORDWRITER_H
-#define CYC_ASYNC_RECORDWRITER_H
+#ifndef CYC_RECORDWRITER_H
+#define CYC_RECORDWRITER_H
 
 #include "RecBuffer.h"
 #include "Record.h"
@@ -30,7 +30,7 @@ namespace cyc {
  * When the active buffer fills up, the writer swaps it with the background buffer
  * and signals the worker thread.
  */
-class AsyncRecordWriter {
+class RecordWriter {
 public:
     /**
      * @brief Constructs the writer.
@@ -38,13 +38,13 @@ public:
      * @param batchCapacity Number of records to hold in each intermediate buffer.
      * Larger batches reduce mutex contention but increase latency.
      */
-    AsyncRecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
+    RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
 
     /**
      * @brief Destructor.
      * Signals the worker to stop, flushes remaining data, and joins the thread.
      */
-    ~AsyncRecordWriter();
+    ~RecordWriter();
 
     /**
      * @brief Prepares the next record slot for writing.
@@ -119,4 +119,4 @@ private:
 
 } // namespace cyc
 
-#endif // CYC_ASYNC_RECORDWRITER_H
+#endif // CYC_RECORDWRITER_H

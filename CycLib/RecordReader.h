@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
-#ifndef CYC_ASYNC_RECORDREADER_H
-#define CYC_ASYNC_RECORDREADER_H
+#ifndef CYC_RECORDREADER_H
+#define CYC_RECORDREADER_H
 
 #include "RecBuffer.h"
 #include "Record.h"
@@ -21,20 +21,20 @@ namespace cyc {
  * Minimizes read latency by fetching the next batch of records from the
  * RecBuffer in a background thread while the user processes the current batch.
  */
-class AsyncRecordReader {
+class RecordReader {
 public:
     /**
      * @brief Constructs the reader.
      * @param target Shared pointer to the source RecBuffer.
      * @param batchCapacity Number of records to read in one batch.
      */
-    AsyncRecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
+    RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
 
     /**
      * @brief Destructor.
      * Stops the background worker thread.
      */
-    ~AsyncRecordReader();
+    ~RecordReader();
 
     /**
      * @brief Retrieves the next available record.
@@ -115,4 +115,4 @@ private:
 
 } // namespace cyc
 
-#endif // CYC_ASYNC_RECORDREADER_H
+#endif // CYC_RECORDREADER_H

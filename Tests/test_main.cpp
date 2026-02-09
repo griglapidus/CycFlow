@@ -131,7 +131,7 @@ TEST(RecBufferTest, WriteAndReadRelative) {
     EXPECT_EQ(rRead.getInt32(PReg::getID("Val")), 20);
 }
 
-// Validates the interaction between separate producer and consumer threads using AsyncRecordWriter/Reader.
+// Validates the interaction between separate producer and consumer threads using RecordWriter/Reader.
 TEST(AsyncIntegrationTest, WriteReadFlow) {
     int idVal = PReg::getID("Val");
     std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32) };
@@ -139,8 +139,8 @@ TEST(AsyncIntegrationTest, WriteReadFlow) {
 
     std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 1000);
 
-    AsyncRecordWriter writer(mainBuffer, 100);
-    AsyncRecordReader reader(mainBuffer, 100);
+    RecordWriter writer(mainBuffer, 100);
+    RecordReader reader(mainBuffer, 100);
 
     const int TOTAL_RECORDS = 100;
 

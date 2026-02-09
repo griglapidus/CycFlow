@@ -154,26 +154,26 @@ TEST_F(CsvWriterTest, HandlesManyRecords) {
     EXPECT_EQ(lines.back(), "1.000000,999");
 }
 
-// Simulates a production scenario with AsyncRecordWriter and verifies the integrity of written data.
+// Simulates a production scenario with RecordWriter and verifies the integrity of written data.
 TEST_F(CsvWriterTest, LongRunningProducerConsumer) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("Counter", DataType::dtInt32);
     RecRule rule(attrs);
     auto buffer = std::make_shared<RecBuffer>(rule, 10000);
-    cyc::AsyncRecordWriter asyncWriter(buffer, 1000);
+    cyc::RecordWriter writer(buffer, 1000);
     cyc::CsvWriter csvWriter(filename, buffer, true, 1000);
 
     const int totalRecords = 5000;
 
     for (int i = 0; i < totalRecords; ++i) {
-        Record rec = asyncWriter.nextRecord();
+        Record rec = writer.nextRecord();
 
         rec.setDouble(rule.getAttributes()[0].id, cyc::get_current_epoch_time());
         rec.setInt32(rule.getAttributes()[1].id, i);
 
-        asyncWriter.commitRecord();
+        writer.commitRecord();
     }
-    asyncWriter.flush();
+    writer.flush();
     csvWriter.finish();
 
     auto lines = readLines(filename);

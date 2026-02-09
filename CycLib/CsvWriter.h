@@ -4,108 +4,80 @@
 #ifndef CYC_CSVWRITER_H
 #define CYC_CSVWRITER_H
 
-#include "CycLib_global.h"
-#include "RecordReader.h"
+#include "RecordConsumer.h"
+#include "PAttr.h"
 #include <string>
 #include <fstream>
-#include <atomic>
-#include <thread>
+#include <vector>
 
 namespace cyc {
 
 /**
- * @brief Writes records from AsyncRecordReader to a CSV file in a background thread.
+ * @brief Writes records from RecBuffer to a CSV file.
  *
- * This class spawns a worker thread that continuously fetches records from
- * the provided reader and appends them to the specified CSV file.
+ * Inherits thread management and reader interaction from RecordConsumer.
+ * This class focuses solely on file I/O and CSV formatting.
  */
-class CYCLIB_EXPORT CsvWriter {
+class CYCLIB_EXPORT CsvWriter : public RecordConsumer {
 public:
     /**
-     * @brief Constructs the writer.
+     * @brief Constructs the CSV writer.
      * @param filename Path to the output CSV file.
-     * @param reader Reference to the source AsyncRecordReader.
+     * @param buffer Shared pointer to the source RecBuffer.
      * @param autoStart If true, the worker thread starts immediately.
+     * @param readerBatchSize Number of records to read in one batch (passed to base class).
      */
     CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t readerBatchSize = 100);
 
     /**
      * @brief Destructor.
-     * Stops the thread and flushes pending data.
+     * Ensures the file is flushed and closed properly.
      */
-    ~CsvWriter();
+    ~CsvWriter() override;
+
+protected:
+    /**
+     * @brief Processes a single record fetched by the base class.
+     * formats the record as a CSV line and writes it to the file.
+     * @param rec The record to write.
+     */
+    void consumeRecord(const Record& rec) override;
 
     /**
-     * @brief Starts the background writing thread.
-     * Does nothing if the thread is already running.
+     * @brief Called by the worker thread just before it stops.
+     * Used here to flush the file stream.
      */
-    void start();
-
-    /**
-     * @brief Stops the background thread.
-     * Blocks until the current write operation finishes and the thread joins.
-     */
-    void stop();
-
-    /**
-     * @brief Initiates graceful shutdown.
-     * Tells the reader to consume all currently written data, waits for it to finish processing,
-     * and then stops the thread.
-     */
-    void extracted();
-    void finish();
-
-    /**
-     * @brief Checks if the writer is currently running.
-     */
-    bool isRunning() const;
+    void onConsumeStop() override;
 
 private:
-    /**
-     * @brief Main loop executed by the background thread.
-     */
-    void workerLoop();
-
-    /**
-     * @brief Writes the CSV header row if the file is new/empty.
-     */
-    void writeHeader();
-
     /**
      * @brief Formats and writes a single field value.
      */
     void writeValue(std::ofstream& file, const Record& rec, const PAttr& attr);
 
     /**
-     * @brief Prepares the output file for writing.
+     * @brief Prepares the output file for writing (creates or appends).
      */
     void setupFile();
 
     /**
      * @brief Generates the CSV header line based on the record schema.
-     * @return A string containing the header row (e.g., "Time,Value,Status\n").
      */
     std::string generateHeader() const;
 
     /**
-     * @brief Generates a unique filename by appending a suffix to the original name.
-     * @param originalName The base filename provided in the constructor.
-     * @return A new filename string with the suffix inserted before the extension.
+     * @brief Generates a unique filename if the original file exists and has a mismatching header.
      */
     std::string createSuffixedFilename(const std::string& originalName) const;
 
 private:
     std::string m_filename;
     std::string m_delimiter;
-
     std::ofstream m_file;
 
-    std::unique_ptr<AsyncRecordReader> m_reader;
-    std::shared_ptr<RecBuffer> m_buffer;
-
-    std::atomic_bool m_running;
-    std::thread m_worker;
+    // Local cache of attributes to avoid querying the rule/reader for every record
+    std::vector<PAttr> m_cachedAttrs;
 };
 
 } // namespace cyc

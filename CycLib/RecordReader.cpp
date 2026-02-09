@@ -5,7 +5,7 @@
 
 namespace cyc {
 
-AsyncRecordReader::AsyncRecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
+RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
     : m_target(target)
     , m_rule(target->getRule())       // Get rule from RecBuffer
     , m_recSize(target->getRecSize()) // Get size from RecBuffer
@@ -26,15 +26,15 @@ AsyncRecordReader::AsyncRecordReader(std::shared_ptr<RecBuffer> target, size_t b
     m_activeBuf = &m_bufferA;
     m_bgBuf = &m_bufferB;
 
-    m_worker = std::thread(&AsyncRecordReader::workerLoop, this);
+    m_worker = std::thread(&RecordReader::workerLoop, this);
 }
 
-AsyncRecordReader::~AsyncRecordReader() {
+RecordReader::~RecordReader() {
     m_target->removeReaderForNotification(this);
     stop();
 }
 
-Record AsyncRecordReader::nextRecord() {
+Record RecordReader::nextRecord() {
     if (m_activeIdx >= m_activeCount) {
         if (!swapBuffers()) {
             return Record(m_rule, nullptr);
@@ -45,12 +45,12 @@ Record AsyncRecordReader::nextRecord() {
     return Record(m_rule, ptr);
 }
 
-void AsyncRecordReader::notifyDataAvailable() {
+void RecordReader::notifyDataAvailable() {
     std::lock_guard<std::mutex> lock(m_mtx);
     m_cv_worker.notify_one();
 }
 
-void AsyncRecordReader::stop() {
+void RecordReader::stop() {
     {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_running = false;
@@ -62,7 +62,7 @@ void AsyncRecordReader::stop() {
     }
 }
 
-void AsyncRecordReader::finish() {
+void RecordReader::finish() {
     std::lock_guard<std::mutex> lock(m_mtx);
     if (!m_running) return;
 
@@ -72,7 +72,7 @@ void AsyncRecordReader::finish() {
     m_cv_worker.notify_all();
 }
 
-bool AsyncRecordReader::swapBuffers() {
+bool RecordReader::swapBuffers() {
     std::unique_lock<std::mutex> lock(m_mtx);
     while (m_bgCount == 0 && m_running) {
         m_cv_user.wait(lock);
@@ -91,7 +91,7 @@ bool AsyncRecordReader::swapBuffers() {
     return true;
 }
 
-void AsyncRecordReader::workerLoop() {
+void RecordReader::workerLoop() {
     while (true) {
         size_t countToRead = 0;
 

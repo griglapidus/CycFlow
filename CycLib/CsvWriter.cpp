@@ -3,109 +3,72 @@
 
 #include "CsvWriter.h"
 #include "RecRule.h"
-#include "PAttr.h"
 #include <iostream>
 #include <iomanip>
+#include <ctime>
+#include <sstream>
 
 namespace cyc {
 
-CsvWriter::CsvWriter(const std::string& filename,  std::shared_ptr<RecBuffer> buffer,
+CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
                      bool autoStart, size_t readerBatchSize)
-    : m_filename(filename)
+    : RecordConsumer(buffer, readerBatchSize) // Initialize base class
+    , m_filename(filename)
     , m_delimiter(",")
-    , m_buffer(buffer)
-    , m_running(false)
 {
-    m_reader = std::make_unique<AsyncRecordReader>(m_buffer, readerBatchSize);
+    // Cache attributes from the reader's rule for performance
+    m_cachedAttrs = getReader().getRule().getAttributes();
+
     setupFile();
+
     if (m_file.is_open()) {
         m_file << std::fixed << std::setprecision(6);
     }
+
     if (autoStart) {
         start();
     }
 }
 
 CsvWriter::~CsvWriter() {
+    // Stop the thread explicitly before closing the file
     stop();
-}
 
-void CsvWriter::start() {
-    if (m_running.load()) return;
-    if (!m_file.is_open()) return;
-    m_running.store(true);
-    m_worker = std::thread(&CsvWriter::workerLoop, this);
-}
-
-void CsvWriter::stop() {
-    bool expected = true;
-    if (!m_running.compare_exchange_strong(expected, false)) return;
-    if (m_reader) {
-        m_reader->stop();
-    }
-    if (m_worker.joinable()) {
-        m_worker.join();
-    }
     if (m_file.is_open()) {
         m_file.flush();
+        m_file.close();
     }
 }
 
-void CsvWriter::finish() {
-    if (!m_running.load()) {
-        return;
-    }
-    if (m_reader) {
-        m_reader->finish();
-    }
-    if (m_worker.joinable()) {
-        m_worker.join();
-    }
-    m_running.store(false);
-    if (m_file.is_open()) {
-        m_file.flush();
-    }
-}
-
-bool CsvWriter::isRunning() const {
-    return m_running.load();
-}
-
-void CsvWriter::workerLoop() {
-    const auto& attrs = m_reader->getRule().getAttributes();
-
-    while (m_running.load()) {
-        Record rec = m_reader->nextRecord();
-
-        if (!rec.isValid()) {
-            break;
-        }
-
-        for (size_t i = 0; i < attrs.size(); ++i) {
-            writeValue(m_file, rec, attrs[i]);
-            if (i < attrs.size() - 1) m_file << m_delimiter;
-        }
-        m_file << "\n";
-    }
-}
-
-void CsvWriter::writeHeader() {
+void CsvWriter::consumeRecord(const Record& rec) {
     if (!m_file.is_open()) return;
-    if (m_file.tellp() != 0) return;
 
-    const auto& attrs = m_reader->getRule().getAttributes();
-    for (size_t i = 0; i < attrs.size(); ++i) {
-        m_file << attrs[i].name << (i < attrs.size() - 1 ? m_delimiter : "");
+    for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
+        writeValue(m_file, rec, m_cachedAttrs[i]);
+        if (i < m_cachedAttrs.size() - 1) {
+            m_file << m_delimiter;
+        }
     }
     m_file << "\n";
 }
 
+void CsvWriter::onConsumeStop() {
+    if (m_file.is_open()) {
+        m_file.flush();
+    }
+}
+
 void CsvWriter::writeValue(std::ofstream& file, const Record& rec, const PAttr& attr) {
     switch (attr.type) {
-    case DataType::dtBool:   file << (rec.getBool(attr.id) ? "1" : "0"); break;
+    case DataType::dtBool:
+        file << (rec.getBool(attr.id) ? "1" : "0");
+        break;
     case DataType::dtChar:
-        if (attr.count > 1) file << "\"" << rec.getCharPtr(attr.id) << "\"";
-        else file << rec.getChar(attr.id);
+        if (attr.count > 1) {
+            file << "\"" << rec.getCharPtr(attr.id) << "\"";
+        } else {
+            file << rec.getChar(attr.id);
+        }
         break;
     case DataType::dtInt8:   file << (int)rec.getInt8(attr.id); break;
     case DataType::dtUInt8:  file << (int)rec.getUInt8(attr.id); break;
@@ -136,6 +99,7 @@ void CsvWriter::setupFile() {
                 isEmpty = false;
                 std::string firstLine;
                 std::getline(inFile, firstLine);
+                // Handle potential Windows line endings
                 if (!firstLine.empty() && firstLine.back() == '\r') {
                     firstLine.pop_back();
                 }
@@ -153,6 +117,7 @@ void CsvWriter::setupFile() {
     } else if (headerMatches) {
         m_file.open(m_filename, std::ios::app);
     } else {
+        // File exists but header mismatch -> create new file with timestamp suffix
         std::string newFilename = createSuffixedFilename(m_filename);
         m_filename = newFilename;
         m_file.open(m_filename, std::ios::out);
@@ -163,9 +128,8 @@ void CsvWriter::setupFile() {
 
 std::string CsvWriter::generateHeader() const {
     std::stringstream ss;
-    const auto& attrs = m_reader->getRule().getAttributes();
-    for (size_t i = 0; i < attrs.size(); ++i) {
-        ss << attrs[i].name << (i < attrs.size() - 1 ? "," : "");
+    for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
+        ss << m_cachedAttrs[i].name << (i < m_cachedAttrs.size() - 1 ? "," : "");
     }
     return ss.str();
 }

@@ -30,7 +30,8 @@ set(HEADERS
     CsvWriter.h
 )
 
-add_library(CycLib ${SOURCES} ${HEADERS})
+add_library(CycLib ${SOURCES} ${HEADERS}
+    RecordConsumer.h RecordConsumer.cpp)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 

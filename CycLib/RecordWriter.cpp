@@ -7,7 +7,7 @@
 
 namespace cyc {
 
-AsyncRecordWriter::AsyncRecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
+RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
     : m_target(target)
         , m_rule(m_target->getRule())       // Get rule from RecBuffer
         , m_recSize(m_target->getRecSize()) // Get size from RecBuffer
@@ -23,14 +23,14 @@ AsyncRecordWriter::AsyncRecordWriter(std::shared_ptr<RecBuffer> target, size_t b
     m_activeBuf = &m_bufferA;
     m_bgBuf = &m_bufferB;
 
-    m_worker = std::thread(&AsyncRecordWriter::workerLoop, this);
+    m_worker = std::thread(&RecordWriter::workerLoop, this);
 }
 
-AsyncRecordWriter::~AsyncRecordWriter() {
+RecordWriter::~RecordWriter() {
     stop();
 }
 
-Record AsyncRecordWriter::nextRecord() {
+Record RecordWriter::nextRecord() {
     if (m_currentIdx >= m_capacity) {
         swapBuffers(true);
     } else if (m_currentIdx >= m_earlyThreshold) {
@@ -40,7 +40,7 @@ Record AsyncRecordWriter::nextRecord() {
     return Record(m_rule, ptr);
 }
 
-void AsyncRecordWriter::commitRecord() {
+void RecordWriter::commitRecord() {
     Record prevRec = nextRecord();
     auto TSId = PReg::getID("TimeStamp");
     if(prevRec.getDouble(TSId) == 0) {
@@ -49,13 +49,13 @@ void AsyncRecordWriter::commitRecord() {
     m_currentIdx++;
 }
 
-void AsyncRecordWriter::flush() {
+void RecordWriter::flush() {
     if (m_currentIdx > 0) {
         swapBuffers(true);
     }
 }
 
-void AsyncRecordWriter::stop() {
+void RecordWriter::stop() {
     if (!m_running) return;
     flush();
     {
@@ -69,7 +69,7 @@ void AsyncRecordWriter::stop() {
     }
 }
 
-bool AsyncRecordWriter::swapBuffers(bool blocking) {
+bool RecordWriter::swapBuffers(bool blocking) {
     std::unique_lock<std::mutex> lock(m_mtx, std::defer_lock);
 
     if (blocking) {
@@ -94,7 +94,7 @@ bool AsyncRecordWriter::swapBuffers(bool blocking) {
     return true;
 }
 
-void AsyncRecordWriter::workerLoop() {
+void RecordWriter::workerLoop() {
     while (true) {
         size_t countToFlush = 0;
         std::vector<uint8_t>* bufToFlush = nullptr;

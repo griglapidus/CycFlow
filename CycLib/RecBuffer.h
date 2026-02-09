@@ -11,7 +11,7 @@
 namespace cyc {
 
 
-class AsyncRecordReader;
+class RecordReader;
 /**
  * @brief High-level storage class for structured records.
  *
@@ -78,8 +78,8 @@ public:
      */
     uint64_t getTotalWritten() const;
 
-    void addReaderForNotification(AsyncRecordReader* reader);
-    void removeReaderForNotification(AsyncRecordReader* reader);
+    void addReaderForNotification(RecordReader* reader);
+    void removeReaderForNotification(RecordReader* reader);
 
 private:
     void notifyReaders();
@@ -87,7 +87,7 @@ private:
 private:
     RecRule m_rule;
     DynamicChunkBuffer m_impl;
-    std::vector<AsyncRecordReader*> m_readers;
+    std::vector<RecordReader*> m_readers;
     mutable std::mutex m_readersMtx;
 };
 

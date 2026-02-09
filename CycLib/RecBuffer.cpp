@@ -32,7 +32,7 @@ size_t RecBuffer::capacity() const { return m_impl.capacity(); }
 
 uint64_t RecBuffer::getTotalWritten() const { return m_impl.getTotalWritten(); }
 
-void RecBuffer::addReaderForNotification(AsyncRecordReader *reader)
+void RecBuffer::addReaderForNotification(RecordReader *reader)
 {
     std::lock_guard<std::mutex> lock(m_readersMtx);
     auto readerIt = std::find(m_readers.begin(), m_readers.end(), reader);
@@ -41,7 +41,7 @@ void RecBuffer::addReaderForNotification(AsyncRecordReader *reader)
     }
 }
 
-void RecBuffer::removeReaderForNotification(AsyncRecordReader *reader)
+void RecBuffer::removeReaderForNotification(RecordReader *reader)
 {
     std::lock_guard<std::mutex> lock(m_readersMtx);
     auto readerIt = std::find(m_readers.begin(), m_readers.end(), reader);
