@@ -4,6 +4,7 @@
 #include "RecordWriter.h"
 #include "PReg.h"
 #include <algorithm>
+#include <cstring>
 
 namespace cyc {
 
@@ -94,6 +95,7 @@ bool RecordWriter::swapBuffers(bool blocking) {
 
     m_bgCount = m_currentIdx;
     std::swap(m_activeBuf, m_bgBuf);
+    std::memset(m_activeBuf->data(), 0, m_activeBuf->size());
     m_currentIdx = 0;
 
     m_hasWork = true;

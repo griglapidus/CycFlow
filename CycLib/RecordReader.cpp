@@ -136,8 +136,12 @@ void RecordReader::workerLoop() {
 
         countToRead = std::min(static_cast<size_t>(lag), m_capacity);
 
-        size_t relativeIndex = currentBufferSize - lag;
-        m_target->readRelative(relativeIndex, m_bgBuf->data(), countToRead);
+        size_t actuallyRead = m_target->readFromGlobal(m_readerCursor, m_bgBuf->data(), countToRead);
+
+        if (actuallyRead == 0 && countToRead > 0) {
+            continue;
+        }
+
         m_readerCursor += countToRead;
 
         if (countToRead > 0) {

@@ -3,7 +3,6 @@
 #include <string>
 #include <cstring>
 #include <thread>
-#include <chrono>
 #include <algorithm>
 #include <CsvWriter.h>
 
@@ -132,16 +131,31 @@ TEST(RecBufferTest, WriteAndReadRelative) {
     EXPECT_EQ(rRead.getInt32(PReg::getID("Val")), 20);
 }
 
+class AsyncIntegrationTest : public ::testing::TestWithParam<std::tuple<double, double>> {
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    StandardSuite,
+    AsyncIntegrationTest,
+    ::testing::Combine(
+        ::testing::Values(0.2,1),
+        ::testing::Values(0.2,1)
+        )
+    );
+
 // Validates the interaction between separate producer and consumer threads using RecordWriter/Reader.
-TEST(AsyncIntegrationTest, WriteReadFlow) {
+TEST_P(AsyncIntegrationTest, WriteReadFlow) {
     int idVal = PReg::getID("Val");
-    std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32) };
+    std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32)};
     RecRule rule(attrs);
+
+    double p1 = std::get<0>(GetParam());
+    double p2 = std::get<1>(GetParam());
 
     std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 50000);
 
-    RecordWriter writer(mainBuffer, 10000);
-    RecordReader reader(mainBuffer, 10000);
+    RecordWriter writer(mainBuffer, 10000 * p1);
+    RecordReader reader(mainBuffer, 10000 * p2);
 
     const int TOTAL_RECORDS = 100000;
 
@@ -154,10 +168,10 @@ TEST(AsyncIntegrationTest, WriteReadFlow) {
         writer.flush();
     });
 
-    std::vector<int> receivedData;
+    std::vector<int> receivedData(TOTAL_RECORDS, 0);
     for (int i = 0; i < TOTAL_RECORDS; ++i) {
         Record r = reader.nextRecord();
-        receivedData.push_back(r.getInt32(idVal));
+        receivedData[i] = r.getInt32(idVal);
     }
     producer.join();
 

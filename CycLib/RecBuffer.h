@@ -39,6 +39,16 @@ public:
     void push(const void* data, size_t count);
 
     /**
+     * @brief Reads data based on an absolute global cursor.
+     * Thread-safe: recalculates relative offset under lock to avoid race conditions.
+     * @param globalCursor The absolute position (totalWritten index) to read from.
+     * @param dest Destination buffer.
+     * @param count Number of records to read.
+     * @return Number of records actually read. Returns 0 if globalCursor is invalid (overwritten).
+     */
+    size_t readFromGlobal(uint64_t globalCursor, void* dest, size_t count) const;
+
+    /**
      * @brief Reads records relative to the current buffer window.
      *
      * Provides random access within the currently cached window of records.
