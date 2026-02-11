@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include <gtest/gtest.h>
 #include <fstream>
 #include <string>
