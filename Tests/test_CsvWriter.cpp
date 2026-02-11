@@ -14,7 +14,7 @@
 
 using namespace cyc;
 
-class CsvWriterTest : public ::testing::Test {
+class CsvWriterTest : public ::testing::TestWithParam<int> {
 protected:
     std::string filename = "test_output.csv";
 
@@ -155,13 +155,13 @@ TEST_F(CsvWriterTest, HandlesManyRecords) {
 }
 
 // Simulates a production scenario with RecordWriter and verifies the integrity of written data.
-TEST_F(CsvWriterTest, LongRunningProducerConsumer) {
+TEST_P(CsvWriterTest, LongRunningProducerConsumer) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("Counter", DataType::dtInt32);
     RecRule rule(attrs);
-    auto buffer = std::make_shared<RecBuffer>(rule, 10000);
-    cyc::RecordWriter writer(buffer, 1000);
-    cyc::CsvWriter csvWriter(filename, buffer, true, 1000);
+    auto buffer = std::make_shared<RecBuffer>(rule, 2000);
+    cyc::RecordWriter writer(buffer, 100);
+    cyc::CsvWriter csvWriter(filename, buffer, true, 100);
 
     const int totalRecords = 5000;
 
@@ -174,6 +174,7 @@ TEST_F(CsvWriterTest, LongRunningProducerConsumer) {
         writer.commitRecord();
     }
     writer.flush();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
     csvWriter.finish();
 
     auto lines = readLines(filename);
@@ -199,3 +200,9 @@ TEST_F(CsvWriterTest, LongRunningProducerConsumer) {
         }
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    StandardSuite,
+    CsvWriterTest,
+    ::testing::Range(0, 5)
+    );

@@ -5,6 +5,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <CsvWriter.h>
 
 #include "PReg.h"
 #include "PAttr.h"
@@ -137,12 +138,12 @@ TEST(AsyncIntegrationTest, WriteReadFlow) {
     std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32) };
     RecRule rule(attrs);
 
-    std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 1000);
+    std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 50000);
 
-    RecordWriter writer(mainBuffer, 100);
-    RecordReader reader(mainBuffer, 100);
+    RecordWriter writer(mainBuffer, 10000);
+    RecordReader reader(mainBuffer, 10000);
 
-    const int TOTAL_RECORDS = 100;
+    const int TOTAL_RECORDS = 100000;
 
     std::thread producer([&]() {
         for(int i = 0; i < TOTAL_RECORDS; ++i) {
@@ -157,9 +158,7 @@ TEST(AsyncIntegrationTest, WriteReadFlow) {
     for (int i = 0; i < TOTAL_RECORDS; ++i) {
         Record r = reader.nextRecord();
         receivedData.push_back(r.getInt32(idVal));
-        if (i % 10 == 0) reader.notifyDataAvailable();
     }
-
     producer.join();
 
     ASSERT_EQ(receivedData.size(), TOTAL_RECORDS);

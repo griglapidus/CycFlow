@@ -12,6 +12,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cassert>
+#include <atomic>
 
 namespace cyc {
 
@@ -72,6 +73,18 @@ public:
      */
     void finish();
 
+    /**
+    * @brief Checks if there is data immediately available in the active buffer
+    * or if the background buffer is full and ready to swap.
+    * Thread-safe relative to the worker thread.
+    */
+    bool hasData() const;
+
+    /**
+     * @brief Returns the total number of records processed by this reader.
+     * Thread-safe.
+     */
+    uint64_t getCursor() const { return m_readerCursor.load(); }
 private:
     /**
      * @brief Swaps the exhausted active buffer with the filled background buffer.
@@ -90,7 +103,7 @@ private:
     size_t m_recSize;        ///< Size of one record in bytes.
     size_t m_capacity;       ///< Batch size.
 
-    uint64_t m_readerCursor; ///< Global cursor position in the RecBuffer.
+    std::atomic<uint64_t> m_readerCursor; ///< Global cursor position in the RecBuffer.
 
     size_t m_activeIdx;      ///< Current read index in the local active buffer.
     size_t m_activeCount;    ///< Number of valid records in the active buffer.

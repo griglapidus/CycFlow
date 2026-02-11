@@ -36,9 +36,10 @@ public:
      * @brief Constructs the writer.
      * @param target Reference to the destination RecBuffer.
      * @param batchCapacity Number of records to hold in each intermediate buffer.
-     * Larger batches reduce mutex contention but increase latency.
+     * @param blockOnFull If true, writer waits for readers to free space.
+     * If false, writer overwrites old data immediately.
      */
-    RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
+    RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull = true);
 
     /**
      * @brief Destructor.
@@ -99,6 +100,7 @@ private:
     size_t m_recSize;        ///< Size of a single record in bytes.
     size_t m_capacity;       ///< Capacity of intermediate buffers.
     size_t m_earlyThreshold; ///< Threshold (20%) to attempt early swapping.
+    bool m_blockOnFull;
 
     size_t m_currentIdx;     ///< Current index in the active buffer.
 

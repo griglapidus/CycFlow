@@ -7,17 +7,22 @@
 
 namespace cyc {
 
-RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
+RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull)
     : m_target(target)
         , m_rule(m_target->getRule())       // Get rule from RecBuffer
         , m_recSize(m_target->getRecSize()) // Get size from RecBuffer
     , m_capacity(batchCapacity)
     , m_earlyThreshold(std::max<size_t>(1, batchCapacity / 5))
+    , m_blockOnFull(blockOnFull)
     , m_currentIdx(0)
     , m_bgCount(0)
     , m_running(true)
     , m_hasWork(false)
 {
+    if (m_blockOnFull) {
+        m_target->addWriter(this);
+    }
+
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
     m_activeBuf = &m_bufferA;
@@ -27,6 +32,9 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 }
 
 RecordWriter::~RecordWriter() {
+    if (m_blockOnFull) {
+        m_target->removeWriter(this);
+    }
     stop();
 }
 
@@ -41,7 +49,8 @@ Record RecordWriter::nextRecord() {
 }
 
 void RecordWriter::commitRecord() {
-    Record prevRec = nextRecord();
+    uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
+    Record prevRec(m_rule, ptr);
     auto TSId = PReg::getID("TimeStamp");
     if(prevRec.getDouble(TSId) == 0) {
         prevRec.setDouble(TSId, get_current_epoch_time());
@@ -110,9 +119,27 @@ void RecordWriter::workerLoop() {
         }
 
         if (countToFlush > 0) {
-            m_target->push(bufToFlush->data(), countToFlush);
+            if (!m_blockOnFull) {
+                m_target->push(bufToFlush->data(), countToFlush);
+            } else {
+                size_t writtenSoFar = 0;
+                const uint8_t* dataPtr = bufToFlush->data();
+                while (writtenSoFar < countToFlush) {
+                    size_t available = m_target->getAvailableWriteSpace();
+                    if (available == 0) {
+                        m_target->waitForSpace([this]() {
+                            return !m_running;
+                        });
+                        if (!m_running) break;
+                        continue;
+                        }
+                    size_t remaining = countToFlush - writtenSoFar;
+                    size_t chunk = std::min(remaining, available);
+                    m_target->push(dataPtr + (writtenSoFar * m_recSize), chunk);
+                    writtenSoFar += chunk;
+                }
+            }
         }
-
         {
             std::lock_guard<std::mutex> lock(m_mtx);
             m_hasWork = false;

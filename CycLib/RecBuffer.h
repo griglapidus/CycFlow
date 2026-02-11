@@ -7,11 +7,14 @@
 #include "CycLib_global.h"
 #include "DynamicChunkBuffer.h"
 #include "RecRule.h"
+#include <condition_variable>
+#include <functional>
 
 namespace cyc {
 
-
 class RecordReader;
+class RecordWriter;
+
 /**
  * @brief High-level storage class for structured records.
  *
@@ -78,17 +81,43 @@ public:
      */
     uint64_t getTotalWritten() const;
 
+    // --- Reader Management ---
     void addReaderForNotification(RecordReader* reader);
     void removeReaderForNotification(RecordReader* reader);
+    // --- Writer Management ---
+    void addWriter(RecordWriter* writer);
+    void removeWriter(RecordWriter* writer);
+
+    /**
+     * @brief Calculates how many records can be written without overwriting unread data.
+     * Checks the cursors of all registered readers.
+     * @return Number of records available for writing.
+     */
+    size_t getAvailableWriteSpace() const;
+
+    /**
+     * @brief Блокирует поток до тех пор, пока не появится свободное место
+     * или не сработает условие прерывания (stopCondition).
+     * @param stopCondition Функция, возвращающая true, если ожидание нужно прервать (например, остановка писателя).
+     */
+    void waitForSpace(std::function<bool()> stopCondition);
+
+    /**
+     * @brief Уведомляет писателей о том, что место освободилось (вызывается читателями).
+     */
+    void notifyWriters();
 
 private:
-    void notifyReaders();
-
+    void notifyReaders() const;
+    size_t getAvailableWriteSpace_nolock() const;
 private:
     RecRule m_rule;
     DynamicChunkBuffer m_impl;
+    mutable std::shared_mutex m_dataRwMtx;
     std::vector<RecordReader*> m_readers;
-    mutable std::mutex m_readersMtx;
+    std::vector<RecordWriter*> m_writers;
+    mutable std::mutex m_syncMtx;
+    std::condition_variable m_spaceCv;
 };
 
 } // namespace cyc

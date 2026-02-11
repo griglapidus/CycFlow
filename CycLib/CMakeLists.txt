@@ -31,7 +31,8 @@ set(HEADERS
 )
 
 add_library(CycLib ${SOURCES} ${HEADERS}
-    RecordConsumer.h RecordConsumer.cpp)
+    RecordConsumer.h RecordConsumer.cpp
+    CycLogger.h CycLogger.cpp)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 

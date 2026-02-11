@@ -72,6 +72,12 @@ void RecordReader::finish() {
     m_cv_worker.notify_all();
 }
 
+bool RecordReader::hasData() const
+{
+    if (m_activeIdx < m_activeCount) return true;
+    return m_bgIsFull;
+}
+
 bool RecordReader::swapBuffers() {
     std::unique_lock<std::mutex> lock(m_mtx);
     while (m_bgCount == 0 && m_running) {
@@ -133,6 +139,10 @@ void RecordReader::workerLoop() {
         size_t relativeIndex = currentBufferSize - lag;
         m_target->readRelative(relativeIndex, m_bgBuf->data(), countToRead);
         m_readerCursor += countToRead;
+
+        if (countToRead > 0) {
+            m_target->notifyWriters();
+        }
 
         if (countToRead > 0) {
             std::lock_guard<std::mutex> lock(m_mtx);
