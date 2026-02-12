@@ -19,6 +19,9 @@ FetchContent_MakeAvailable(googletest)
 add_executable(CycTests
   test_main.cpp
   test_CsvWriter.cpp
+  CbfTest.cpp
+  CbfWriterTest.cpp
+  CbfReaderTest.cpp
 )
 
 # 3. Линкуем с вашей библиотекой и GTest

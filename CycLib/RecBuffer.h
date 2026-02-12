@@ -91,6 +91,8 @@ public:
      */
     uint64_t getTotalWritten() const;
 
+    std::tuple<uint64_t, size_t> getTotalWrittenAndSize() const;
+
     // --- Reader Management ---
     void addReaderForNotification(RecordReader* reader);
     void removeReaderForNotification(RecordReader* reader);
@@ -120,12 +122,15 @@ public:
 private:
     void notifyReaders() const;
     size_t getAvailableWriteSpace_nolock() const;
+    uint64_t calculateMinReadCursor_nolock() const;
+
 private:
     RecRule m_rule;
     DynamicChunkBuffer m_impl;
     mutable std::shared_mutex m_dataRwMtx;
     std::vector<RecordReader*> m_readers;
     std::vector<RecordWriter*> m_writers;
+    mutable uint64_t m_phantomReadCursor;
     mutable std::mutex m_syncMtx;
     std::condition_variable m_spaceCv;
 };

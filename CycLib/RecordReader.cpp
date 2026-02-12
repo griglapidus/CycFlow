@@ -18,8 +18,11 @@ RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     , m_finishing(false)      // Init
     , m_finishTarget(0)       // Init
 {
+    auto totalAndSize = m_target->getTotalWrittenAndSize();
+    uint64_t totalWritten = std::get<0>(totalAndSize);
+    size_t currentBufferSize = std::get<1>(totalAndSize);
+    m_readerCursor = totalWritten - currentBufferSize;
     m_target->addReaderForNotification(this);
-    m_readerCursor = m_target->getTotalWritten();
 
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
@@ -122,8 +125,9 @@ void RecordReader::workerLoop() {
             }
         }
 
-        uint64_t totalWritten = m_target->getTotalWritten();
-        size_t currentBufferSize = m_target->size();
+        auto totalAndSize = m_target->getTotalWrittenAndSize();
+        uint64_t totalWritten = std::get<0>(totalAndSize);
+        size_t currentBufferSize = std::get<1>(totalAndSize);
 
         uint64_t lag = totalWritten - m_readerCursor;
 

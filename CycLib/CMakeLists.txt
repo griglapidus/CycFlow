@@ -32,7 +32,11 @@ set(HEADERS
 
 add_library(CycLib ${SOURCES} ${HEADERS}
     RecordConsumer.h RecordConsumer.cpp
-    CycLogger.h CycLogger.cpp)
+    CbfDefs.h
+    CbfWriter.h CbfWriter.cpp
+    RecordProducer.h RecordProducer.cpp
+    CbfReader.h CbfReader.cpp
+    CbfFile.h CbfFile.cpp)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 

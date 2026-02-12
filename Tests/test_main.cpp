@@ -154,8 +154,8 @@ TEST_P(AsyncIntegrationTest, WriteReadFlow) {
 
     std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 50000);
 
-    RecordWriter writer(mainBuffer, 10000 * p1);
-    RecordReader reader(mainBuffer, 10000 * p2);
+    RecordWriter writer(mainBuffer, (size_t)(10000 * p1));
+    RecordReader reader(mainBuffer, (size_t)(10000 * p2));
 
     const int TOTAL_RECORDS = 100000;
 

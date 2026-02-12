@@ -12,7 +12,7 @@ PAttr::PAttr() :
     type(DataType::dtUndefine),
     count(1)
 {
-    name[0] = 0;
+    memset(name, 0, 26);
 }
 
 PAttr::PAttr(const char* _name, DataType _type, size_t _count) :

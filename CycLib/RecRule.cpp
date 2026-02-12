@@ -2,9 +2,11 @@
 // Copyright (c) 2026 Grigorii Lapidus
 
 #include "RecRule.h"
+#include <cstring>
 #include <numeric>
 #include <algorithm>
 #include <iterator>
+#include <sstream>
 
 namespace cyc {
 
@@ -60,4 +62,68 @@ DataType RecRule::getType(int id) const {
 }
 const std::vector<PAttr>& RecRule::getAttributes() const { return m_attrs; }
 
+std::string RecRule::toText() const {
+    std::stringstream ss;
+    for (const auto& attr : m_attrs) {
+        ss << attr.name << ";"
+           << dataTypeToString(attr.type) << ";"
+           << attr.count << ";"
+           << attr.offset << "\n";
+    }
+    return ss.str();
+}
+
+RecRule RecRule::fromText(const std::string& text) {
+    // 1. Create a temporary default rule to identify current system headers.
+    RecRule defaultRule;
+    defaultRule.buildHeader();
+    // defaultRule.init() is called in constructor -> buildHeader() is called.
+    const auto& systemHeaders = defaultRule.m_headerAttrs;
+
+    std::vector<PAttr> userAttrs;
+    std::stringstream ss(text);
+    std::string line;
+
+    while (std::getline(ss, line)) {
+        if (line.empty()) continue;
+        if (line.back() == '\r') line.pop_back(); // Handle Windows line endings
+
+        std::stringstream ls(line);
+        std::string segment;
+        std::vector<std::string> parts;
+
+        while(std::getline(ls, segment, ';')) {
+            parts.push_back(segment);
+        }
+
+        // Format: Name;Type;Count;Offset
+        if (parts.size() >= 3) {
+            std::string name = parts[0];
+
+            // 2. Check if this attribute is one of the system headers
+            bool isSystemHeader = false;
+            for (const auto& header : systemHeaders) {
+                // Compare name string with header name
+                if (strncmp(header.name, name.c_str(), 25) == 0) {
+                    isSystemHeader = true;
+                    break;
+                }
+            }
+
+            // 3. Skip system headers to avoid duplication in RecRule::init()
+            if (isSystemHeader) {
+                continue;
+            }
+
+            DataType type = dataTypeFromString(parts[1].c_str());
+            size_t count = std::stoul(parts[2]);
+
+            // Offset is ignored as it is recalculated
+            userAttrs.emplace_back(name.c_str(), type, count);
+        }
+    }
+
+    // Create RecRule. This calls init(), which prepends systemHeaders and recalculates offsets.
+    return RecRule(userAttrs);
+}
 } // namespace cyc

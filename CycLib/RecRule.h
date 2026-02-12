@@ -5,6 +5,7 @@
 #define CYC_RECRULE_H
 
 #include "PAttr.h"
+#include <string>
 #include <vector>
 
 namespace cyc {
@@ -67,6 +68,18 @@ public:
      * @return Constant reference to the attribute vector.
      */
     const std::vector<PAttr>& getAttributes() const;
+
+    /**
+     * @brief Serializes the rule to a text format (CSV-like).
+     */
+    std::string toText() const;
+
+    /**
+     * @brief Creates a RecRule from its text representation.
+     * @param text The serialized rule string.
+     * @return A new RecRule object.
+     */
+    static RecRule fromText(const std::string& text);
 
 private:
     std::vector<PAttr> m_headerAttrs;

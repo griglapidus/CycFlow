@@ -51,10 +51,19 @@ public:
     void clear();
 
     /**
-     * @brief Copies data from a source memory location.
-     * @param src Pointer to source data.
+     * @brief Get size of internal data
      */
-    void copyFrom(const void* src);
+    size_t getSize() const;
+
+    /**
+     * @brief Get pointer to raw data
+     */
+    void* data();
+
+    /**
+     * @brief Get const pointer to raw data
+     */
+    const void* data() const;
 
     /**
      * @brief Gets a raw pointer to a field by ID.
@@ -86,8 +95,8 @@ public:
     void* getPtr(int id) const { return *static_cast<void**>(getVoid(id)); }
 
 private:
-    const RecRule& rule;
-    uint8_t* data;
+    const RecRule& m_rule;
+    uint8_t* m_data;
 };
 
 } // namespace cyc

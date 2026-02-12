@@ -6,33 +6,42 @@
 
 namespace cyc {
 
-Record::Record(const RecRule& r, void* ptr) 
-    : rule(r), data(static_cast<uint8_t*>(ptr)) 
+Record::Record(const RecRule& r, void* ptr)
+    : m_rule(r), m_data(static_cast<uint8_t*>(ptr))
 {}
 
-bool Record::isValid() const { return data != nullptr; }
-void Record::setData(void* ptr) { data = static_cast<uint8_t*>(ptr); }
+bool Record::isValid() const { return m_data != nullptr; }
+void Record::setData(void* ptr) { m_data = static_cast<uint8_t*>(ptr); }
 
 void Record::clear()
 {
     if (isValid()) {
-        std::memset(data, 0, rule.getRecSize());
+        std::memset(m_data, 0, m_rule.getRecSize());
     }
 }
-void Record::copyFrom(const void* src) {
-    if (isValid() && src) {
-        std::memcpy(data, src, rule.getRecSize());
-    }
+
+size_t Record::getSize() const
+{
+    return m_rule.getRecSize();
+}
+
+void *Record::data() {
+    return m_data;
+}
+
+const void *Record::data() const
+{
+    return m_data;
 }
 void* Record::getVoid(int id) const {
     if (!isValid()) {
         return nullptr;
     }
-    return data + rule.getOffsetById(id);
+    return m_data + m_rule.getOffsetById(id);
 }
 
 double Record::getValue(int id) const {
-    DataType type = rule.getType(id);
+    DataType type = m_rule.getType(id);
     void* ptr = getVoid(id);
     if (!ptr) return 0.0;
 
@@ -55,7 +64,7 @@ double Record::getValue(int id) const {
 }
 
 void Record::setValue(int id, double val) {
-    DataType type = rule.getType(id);
+    DataType type = m_rule.getType(id);
     void* ptr = getVoid(id);
     if (!ptr) return;
 

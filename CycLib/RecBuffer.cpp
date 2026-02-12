@@ -10,6 +10,7 @@ namespace cyc {
 RecBuffer::RecBuffer(const RecRule &rule, size_t capacity)
         : m_rule(rule)
         , m_impl(capacity, rule.getRecSize()) // Pass only size to impl
+        , m_phantomReadCursor(0)
     {
     }
 
@@ -43,6 +44,12 @@ size_t RecBuffer::capacity() const {
 uint64_t RecBuffer::getTotalWritten() const {
     std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
     return m_impl.getTotalWritten();
+}
+
+std::tuple<uint64_t, size_t> RecBuffer::getTotalWrittenAndSize() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
+    return std::make_tuple(m_impl.getTotalWritten(), m_impl.size());
 }
 
 void RecBuffer::addReaderForNotification(RecordReader *reader)
@@ -110,28 +117,41 @@ size_t RecBuffer::getAvailableWriteSpace_nolock() const
     size_t cap;
     {
         std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
-        if (m_readers.empty()) {
-            return m_impl.capacity();
-        }
         totalWritten = m_impl.getTotalWritten();
         cap = m_impl.capacity();
     }
 
-    uint64_t minReaderCursor = totalWritten;
+    uint64_t minReaderCursor = calculateMinReadCursor_nolock();
 
-    for (const auto* reader : m_readers) {
-        uint64_t cursor = reader->getCursor();
-        if (cursor < minReaderCursor) {
-            minReaderCursor = cursor;
-        }
-    }
+    if (totalWritten < minReaderCursor) return cap;
 
     uint64_t unreadCount = totalWritten - minReaderCursor;
+
     if (unreadCount >= cap) {
         return 0;
     }
 
     return cap - static_cast<size_t>(unreadCount);
+}
+
+uint64_t RecBuffer::calculateMinReadCursor_nolock() const
+{
+    if (m_readers.empty()) {
+        return m_phantomReadCursor;
+    }
+
+    uint64_t minCursor = UINT64_MAX;
+    for (const auto* r : m_readers) {
+        uint64_t c = r->getCursor();
+        if (c < minCursor) minCursor = c;
+    }
+
+    if (minCursor == UINT64_MAX) {
+        return m_phantomReadCursor;
+    }
+
+    m_phantomReadCursor = minCursor;
+    return minCursor;
 }
 
 void RecBuffer::notifyWriters()

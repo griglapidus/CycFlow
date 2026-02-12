@@ -43,6 +43,15 @@ size_t getTypeSize(DataType t);
  */
 double get_current_epoch_time();
 
+/**
+ * @brief Converts DataType enum to string representation.
+ * @param t Data type.
+ * @return String representation of the type.
+ */
+const char* dataTypeToString(DataType t);
+
+DataType dataTypeFromString(const char* str);
+
 } // namespace cyc
 
 #endif // CYC_COMMON_H
