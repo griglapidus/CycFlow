@@ -18,6 +18,8 @@ set(SOURCES
     Cbf/CbfWriter.cpp
     Cbf/CbfReader.cpp
     Cbf/CbfFile.cpp
+    Tcp/TcpServer.cpp
+    Tcp/TcpServiceClient.cpp
 )
 
 set(HEADERS
@@ -39,15 +41,30 @@ set(HEADERS
     Cbf/CbfFile.h
     Cbf/CbfWriter.h
     Cbf/CbfReader.h
+    Tcp/TcpDefs.h
+    Tcp/MessageUtils.h
+    Tcp/TcpServer.h
+    Tcp/TcpServiceClient.h
 )
 
 add_library(CycLib ${SOURCES} ${HEADERS})
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 
+target_compile_definitions(CycLib PUBLIC ASIO_STANDALONE)
+
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_package(Threads REQUIRED)
+target_link_libraries(CycLib PUBLIC Threads::Threads asio::asio)
+
+if(WIN32)
+    target_link_libraries(CycLib PUBLIC ws2_32 mswsock)
+endif()
+
 target_include_directories(CycLib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $<BUILD_INTERFACE:${asio_SOURCE_DIR}/asio/include>
 )
 
 if(BUILD_SHARED_LIBS)
@@ -57,12 +74,15 @@ else()
 endif()
 
 set(CYC_HEADER_DEST_DIR "${HEADER_DEST_DIR}/Cyc")
-add_custom_command(TARGET CycLib POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CYC_HEADER_DEST_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HEADERS} "${CYC_HEADER_DEST_DIR}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "Copying headers to ${CYC_HEADER_DEST_DIR}..."
-)
+foreach(HEADER IN LISTS HEADERS)
+    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
+    set(DEST_DIR "${CYC_HEADER_DEST_DIR}/${HEADER_DIR}")
+    add_custom_command(TARGET CycLib POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEST_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HEADER}" "${DEST_DIR}/"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endforeach()
 
 include(GNUInstallDirs)
 install(TARGETS
