@@ -4,8 +4,8 @@
 #ifndef CYC_RECORDWRITER_H
 #define CYC_RECORDWRITER_H
 
-#include "RecBuffer.h"
-#include "Record.h"
+#include "Core/RecBuffer.h"
+#include "Core/Record.h"
 
 #include <vector>
 #include <thread>
@@ -30,7 +30,7 @@ namespace cyc {
  * When the active buffer fills up, the writer swaps it with the background buffer
  * and signals the worker thread.
  */
-class RecordWriter {
+class CYCLIB_EXPORT RecordWriter {
 public:
     /**
      * @brief Constructs the writer.

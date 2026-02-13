@@ -3,10 +3,10 @@
 #include <vector>
 #include <string>
 
-#include "CbfFile.h"
-#include "RecRule.h"
-#include "Record.h"
-#include "PAttr.h"
+#include "Cbf/CbfFile.h"
+#include "Core/RecRule.h"
+#include "Core/Record.h"
+#include "Core/PAttr.h"
 
 using namespace cyc;
 

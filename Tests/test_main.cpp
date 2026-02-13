@@ -4,14 +4,14 @@
 #include <cstring>
 #include <thread>
 #include <algorithm>
-#include <CsvWriter.h>
+#include <Csv/CsvWriter.h>
 
-#include "PReg.h"
-#include "PAttr.h"
-#include "RecRule.h"
-#include "Record.h"
-#include "CircularBuffer.h"
-#include "RecBuffer.h"
+#include "Core/PReg.h"
+#include "Core/PAttr.h"
+#include "Core/RecRule.h"
+#include "Core/Record.h"
+#include "Core/CircularBuffer.h"
+#include "Core/RecBuffer.h"
 #include "RecordWriter.h"
 #include "RecordReader.h"
 

@@ -6,11 +6,11 @@
 #include <vector>
 #include <cstdio>
 #include <sstream>
-#include "CsvWriter.h"
-#include "RecBuffer.h"
-#include "RecRule.h"
-#include "Record.h"
-#include "PAttr.h"
+#include "Csv/CsvWriter.h"
+#include "Core/RecBuffer.h"
+#include "Core/RecRule.h"
+#include "Core/Record.h"
+#include "Core/PAttr.h"
 #include "RecordWriter.h"
 
 using namespace cyc;

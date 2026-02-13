@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstddef> // Added for size_t
+#include "CycLib_global.h"
 
 namespace cyc {
 
@@ -41,7 +42,7 @@ size_t getTypeSize(DataType t);
  * @brief Gets the current epoch time.
  * @return Current time as a double.
  */
-double get_current_epoch_time();
+CYCLIB_EXPORT double get_current_epoch_time();
 
 /**
  * @brief Converts DataType enum to string representation.

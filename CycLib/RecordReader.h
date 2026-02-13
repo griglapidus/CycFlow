@@ -4,8 +4,8 @@
 #ifndef CYC_RECORDREADER_H
 #define CYC_RECORDREADER_H
 
-#include "RecBuffer.h"
-#include "Record.h"
+#include "Core/RecBuffer.h"
+#include "Core/Record.h"
 
 #include <vector>
 #include <thread>
@@ -22,7 +22,7 @@ namespace cyc {
  * Minimizes read latency by fetching the next batch of records from the
  * RecBuffer in a background thread while the user processes the current batch.
  */
-class RecordReader {
+class CYCLIB_EXPORT RecordReader {
 public:
     /**
      * @brief Constructs the reader.

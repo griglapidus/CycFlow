@@ -4,7 +4,7 @@
 #ifndef CYC_RECORDCONSUMER_H
 #define CYC_RECORDCONSUMER_H
 
-#include "CycLib_global.h"
+#include "Core/CycLib_global.h"
 #include "RecordReader.h"
 #include <atomic>
 #include <thread>

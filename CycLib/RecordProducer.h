@@ -4,10 +4,10 @@
 #ifndef CYC_RECORDPRODUCER_H
 #define CYC_RECORDPRODUCER_H
 
-#include "CycLib_global.h"
-#include "RecBuffer.h"
+#include "Core/CycLib_global.h"
+#include "Core/RecBuffer.h"
 #include "RecordWriter.h"
-#include "RecRule.h"
+#include "Core/RecRule.h"
 #include <atomic>
 #include <thread>
 #include <memory>

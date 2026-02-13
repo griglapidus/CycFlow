@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Grigorii Lapidus
 
 #include "RecordProducer.h"
-#include <stdexcept>
 
 namespace cyc {
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Grigorii Lapidus
 
 #include "CsvWriter.h"
-#include "RecRule.h"
+#include "Core/RecRule.h"
 #include <iostream>
 #include <iomanip>
 #include <ctime>

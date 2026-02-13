@@ -5,7 +5,7 @@
 #define CYC_CSVWRITER_H
 
 #include "RecordConsumer.h"
-#include "PAttr.h"
+#include "Core/PAttr.h"
 #include <string>
 #include <fstream>
 #include <vector>

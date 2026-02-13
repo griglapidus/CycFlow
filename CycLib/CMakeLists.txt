@@ -4,39 +4,44 @@ project(CycLib)
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
 
 set(SOURCES
-    Common.cpp
-    PAttr.cpp
-    PReg.cpp
-    RecBuffer.cpp
-    RecRule.cpp
-    Record.cpp
+    Core/Common.cpp
+    Core/PAttr.cpp
+    Core/PReg.cpp
+    Core/RecBuffer.cpp
+    Core/RecRule.cpp
+    Core/Record.cpp
     RecordWriter.cpp
     RecordReader.cpp
-    CsvWriter.cpp
+    RecordConsumer.cpp
+    RecordProducer.cpp
+    Csv/CsvWriter.cpp
+    Cbf/CbfWriter.cpp
+    Cbf/CbfReader.cpp
+    Cbf/CbfFile.cpp
 )
 
 set(HEADERS
-    Common.h
-    CycLib_global.h
-    PAttr.h
-    PReg.h
-    RecBuffer.h
-    RecRule.h
-    Record.h
-    CircularBuffer.h
-    DynamicChunkBuffer.h
+    Core/Common.h
+    Core/CycLib_global.h
+    Core/PAttr.h
+    Core/PReg.h
+    Core/RecBuffer.h
+    Core/RecRule.h
+    Core/Record.h
+    Core/CircularBuffer.h
+    Core/DynamicChunkBuffer.h
     RecordWriter.h
     RecordReader.h
-    CsvWriter.h
+    RecordConsumer.h
+    RecordProducer.h
+    Csv/CsvWriter.h
+    Cbf/CbfDefs.h
+    Cbf/CbfFile.h
+    Cbf/CbfWriter.h
+    Cbf/CbfReader.h
 )
 
-add_library(CycLib ${SOURCES} ${HEADERS}
-    RecordConsumer.h RecordConsumer.cpp
-    CbfDefs.h
-    CbfWriter.h CbfWriter.cpp
-    RecordProducer.h RecordProducer.cpp
-    CbfReader.h CbfReader.cpp
-    CbfFile.h CbfFile.cpp)
+add_library(CycLib ${SOURCES} ${HEADERS})
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 
@@ -60,7 +65,8 @@ add_custom_command(TARGET CycLib POST_BUILD
 )
 
 include(GNUInstallDirs)
-install(TARGETS CycLib
+install(TARGETS
+    CycLib
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -69,8 +75,8 @@ install(TARGETS CycLib
 set_target_properties(CycLib PROPERTIES OUTPUT_NAME "Cyc")
 set_target_properties(CycLib PROPERTIES DEBUG_POSTFIX "_d")
 
-# Совет: Auto-install в POST_BUILD может замедлять разработку,
-# если проект большой, но для маленькой библиотеки это допустимо.
+# Tip: Auto-install in POST_BUILD can slow down development,
+# if the project is large, but for a small library this is acceptable.
 add_custom_command(TARGET CycLib POST_BUILD
     COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}" --config $<CONFIG>
     COMMENT "Auto-installing CycLib..."

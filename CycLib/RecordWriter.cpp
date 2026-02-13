@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Grigorii Lapidus
 
 #include "RecordWriter.h"
-#include "PReg.h"
+#include "Core/PReg.h"
 #include <algorithm>
 #include <cstring>
 
