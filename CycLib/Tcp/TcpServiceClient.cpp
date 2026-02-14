@@ -1,5 +1,5 @@
-// TcpServiceClient.cpp
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #include "TcpServiceClient.h"
 #include "MessageUtils.h"

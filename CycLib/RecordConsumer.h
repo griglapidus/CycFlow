@@ -59,13 +59,35 @@ protected:
 
     const RecordReader& getReader() const;
 
-private:
-    void workerLoop();
+    virtual void workerLoop();
 
-private:
+protected:
     std::unique_ptr<RecordReader> m_reader;
     std::atomic_bool m_running;
     std::thread m_worker;
+};
+
+class CYCLIB_EXPORT BatchRecordConsumer : public RecordConsumer {
+public:
+    using RecordConsumer::RecordConsumer; // Используем конструктор базового класса
+
+protected:
+    /**
+     * @brief Заглушка для поштучного метода.
+     * Помечена final, чтобы никто случайно не попытался её использовать.
+     */
+    void consumeRecord(const Record& rec) override final {}
+
+    /**
+     * @brief Новый чисто виртуальный метод для обработки пакетов.
+     * Наследник ОБЯЗАН реализовать именно его.
+     */
+    virtual void consumeBatch(const RecordReader::RecordBatch& batch) = 0;
+
+    /**
+     * @brief Переопределенный цикл, работающий с пакетами.
+     */
+    void workerLoop() override;
 };
 
 } // namespace cyc

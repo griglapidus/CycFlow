@@ -1,5 +1,5 @@
-// TcpServiceClient.h
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #ifndef CYC_TCPSERVICECLIENT_H
 #define CYC_TCPSERVICECLIENT_H

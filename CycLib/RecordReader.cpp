@@ -48,6 +48,21 @@ Record RecordReader::nextRecord() {
     return Record(m_rule, ptr);
 }
 
+RecordReader::RecordBatch RecordReader::nextBatch()
+{
+    if (m_activeIdx >= m_activeCount) {
+        if (!swapBuffers()) {
+            return {nullptr, 0, m_rule, m_recSize};
+        }
+    }
+
+    uint8_t* ptr = m_activeBuf->data() + (m_activeIdx * m_recSize);
+    size_t remaining = m_activeCount - m_activeIdx;
+    m_activeIdx = m_activeCount;
+
+    return {ptr, remaining, m_rule, m_recSize};
+}
+
 void RecordReader::notifyDataAvailable() {
     std::lock_guard<std::mutex> lock(m_mtx);
     m_cv_worker.notify_one();

@@ -24,6 +24,14 @@ namespace cyc {
  */
 class CYCLIB_EXPORT RecordReader {
 public:
+    struct RecordBatch {
+        const uint8_t* data;
+        size_t count;
+        const RecRule& rule;
+        size_t recordSize;
+
+        bool isValid() const { return data != nullptr && count > 0; }
+    };
     /**
      * @brief Constructs the reader.
      * @param target Shared pointer to the source RecBuffer.
@@ -46,6 +54,14 @@ public:
      * @return A Record wrapper pointing to the fetched data.
      */
     Record nextRecord();
+
+    /**
+     * @brief Возвращает пакет записей (весь остаток активного буфера).
+     *
+     * Если активный буфер пуст, метод ожидает загрузки нового из фонового потока.
+     * После вызова внутренний курсор читателя перемещается в конец буфера.
+     */
+    RecordBatch nextBatch();
 
     /**
      * @brief Returns the schema used by this reader.

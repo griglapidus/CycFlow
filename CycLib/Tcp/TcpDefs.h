@@ -1,5 +1,5 @@
-// TcpDefs.h
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #ifndef CYC_TCPDEFS_H
 #define CYC_TCPDEFS_H

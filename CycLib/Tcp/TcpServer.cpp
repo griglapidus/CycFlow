@@ -1,5 +1,5 @@
-// TcpServer.cpp
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #include "TcpServer.h"
 #include "MessageUtils.h"
@@ -78,17 +78,34 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
         case MessageType::RequestDataStream: {
             std::string bufferName(payload.begin(), payload.end());
             std::shared_ptr<RecBuffer> targetBuffer;
+
             {
                 std::shared_lock<std::shared_mutex> lock(m_buffersMtx);
-                auto it = m_buffers.find(bufferName);
-                if (it != m_buffers.end()) {
-                    targetBuffer = it->second;
+                if (m_buffers.count(bufferName)) {
+                    targetBuffer = m_buffers[bufferName];
                 }
             }
 
             if (targetBuffer) {
-                // TODO: Step 3 - Create DataSender and transfer socket ownership
-                MessageUtils::sendMessage(socket, MessageType::ResponseError, "DataSender not implemented", ec);
+                std::string ruleText = targetBuffer->getRule().toText();
+                MessageUtils::sendMessage(socket, MessageType::ResponseRecRule, ruleText, ec);
+                if (ec) return;
+
+                cleanupDeadSenders();
+                auto sender = std::make_shared<TcpDataSender>(
+                    targetBuffer,
+                    std::move(socket),
+                    100
+                    );
+
+                {
+                    std::lock_guard<std::mutex> lock(m_sendersMtx);
+                    m_activeSenders.push_back(sender);
+                }
+
+                sender->start();
+                return;
+
             } else {
                 MessageUtils::sendMessage(socket, MessageType::ResponseError, "Buffer not found", ec);
             }
@@ -100,6 +117,17 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
             break;
         }
     }
+}
+
+void TcpServer::cleanupDeadSenders()
+{
+    std::lock_guard<std::mutex> lock(m_sendersMtx);
+    auto it = std::remove_if(m_activeSenders.begin(), m_activeSenders.end(),
+                             [](const std::shared_ptr<TcpDataSender>& sender) {
+                                 return !sender->isRunning();
+                             });
+
+    m_activeSenders.erase(it, m_activeSenders.end());
 }
 
 } // namespace cyc

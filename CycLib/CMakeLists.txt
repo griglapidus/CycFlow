@@ -47,7 +47,9 @@ set(HEADERS
     Tcp/TcpServiceClient.h
 )
 
-add_library(CycLib ${SOURCES} ${HEADERS})
+add_library(CycLib ${SOURCES} ${HEADERS}
+    Tcp/TcpDataSender.h Tcp/TcpDataSender.cpp
+    Tcp/TcpDataReceiver.h Tcp/TcpDataReceiver.cpp)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 

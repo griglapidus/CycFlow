@@ -29,7 +29,11 @@ void RecordConsumer::stop() {
         m_reader->stop();
     }
     if (m_worker.joinable()) {
-        m_worker.join();
+        if (std::this_thread::get_id() != m_worker.get_id()) {
+            m_worker.join();
+        } else {
+            m_worker.detach();
+        }
     }
 }
 
@@ -43,7 +47,11 @@ void RecordConsumer::finish() {
     }
 
     if (m_worker.joinable()) {
-        m_worker.join();
+        if (std::this_thread::get_id() != m_worker.get_id()) {
+            m_worker.join();
+        } else {
+            m_worker.detach();
+        }
     }
     m_running.store(false);
 }
@@ -67,6 +75,20 @@ void RecordConsumer::workerLoop() {
         }
 
         consumeRecord(rec);
+    }
+
+    onConsumeStop();
+}
+
+void BatchRecordConsumer::workerLoop() {
+    onConsumeStart();
+
+    while (m_running.load()) {
+        auto batch = m_reader->nextBatch();
+        if (!batch.isValid()) {
+            break;
+        }
+        consumeBatch(batch);
     }
 
     onConsumeStop();

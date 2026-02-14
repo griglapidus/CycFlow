@@ -4,7 +4,7 @@
 #ifndef CYC_CBFWRITER_H
 #define CYC_CBFWRITER_H
 
-#include "RecordConsumer.h"
+#include "RecordConsumer.h" // Здесь теперь определен BatchRecordConsumer
 #include "CbfFile.h"
 #include <string>
 
@@ -12,16 +12,16 @@ namespace cyc {
 
 /**
  * @brief Асинхронный писатель данных в формате CBF.
- * * Читает данные из RecBuffer в фоновом потоке и записывает их в файл
- * используя структуру CBF (Header + Data sections).
+ * Использует пакетный режим (BatchRecordConsumer) для эффективной записи
+ * больших блоков данных на диск.
  */
-class CYCLIB_EXPORT CbfWriter : public RecordConsumer {
+class CYCLIB_EXPORT CbfWriter : public BatchRecordConsumer {
 public:
     /**
      * @param filename Путь к выходному файлу.
      * @param buffer Источник данных.
      * @param autoStart Запустить поток записи сразу после создания.
-     * @param batchSize Количество записей, которые читатель извлекает за раз.
+     * @param batchSize Размер внутреннего буфера чтения (в записях).
      */
     CbfWriter(const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
@@ -46,9 +46,10 @@ protected:
     void onConsumeStart() override;
 
     /**
-     * @brief Обрабатывает одну запись: пишет её в файл.
+     * @brief Обрабатывает пакет записей.
+     * Пишет весь блок памяти в файл за одну операцию.
      */
-    void consumeRecord(const Record& rec) override;
+    void consumeBatch(const RecordReader::RecordBatch& batch) override;
 
     /**
      * @brief Вызывается после остановки цикла (или при ошибке).

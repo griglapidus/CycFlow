@@ -25,6 +25,7 @@ add_executable(CycTests
   CbfWriterTest.cpp
   CbfReaderTest.cpp
   TcpTests.cpp
+  TcpIntegrationTests.cpp
 )
 
 target_link_libraries(CycTests PRIVATE CycLib GTest::gtest_main)

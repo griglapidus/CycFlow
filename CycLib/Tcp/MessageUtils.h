@@ -1,5 +1,5 @@
-// MessageUtils.h
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #ifndef CYC_MESSAGEUTILS_H
 #define CYC_MESSAGEUTILS_H
