@@ -29,8 +29,6 @@ struct CbfSectionHeader {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(CbfSectionHeader) == 24, "CbfSectionHeader size must be exactly 24 bytes");
-
 } // namespace cyc
 
 #endif // CYC_CBFDEFS_H

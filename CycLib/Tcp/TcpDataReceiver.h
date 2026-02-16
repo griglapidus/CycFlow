@@ -5,75 +5,67 @@
 #define CYC_TCPDATARECEIVER_H
 
 #include "Core/CycLib_global.h"
+#include "RecordProducer.h" // Наследуемся от базового RecordProducer
+#include "TcpDefs.h"
 #include <asio.hpp>
 #include <string>
-#include <memory>
-#include <thread>
 #include <atomic>
-#include <functional>
-
-#include "Core/RecBuffer.h"
 
 namespace cyc {
 
-class CYCLIB_EXPORT TcpDataReceiver {
+/**
+ * @brief Принимает данные по TCP в режиме Request-Response и пишет их в RecBuffer.
+ */
+class CYCLIB_EXPORT TcpDataReceiver : public RecordProducer {
 public:
     /**
-     * @brief Creates a receiver.
-     * @param bufferCapacity Capacity for the dynamically created RecBuffer.
+     * @param bufferCapacity Емкость создаваемого буфера.
+     * @param writerBatchSize Размер пакета записи (максимальный размер транзакции).
      */
-    TcpDataReceiver(size_t bufferCapacity = 1000);
-    ~TcpDataReceiver();
+    TcpDataReceiver(size_t bufferCapacity = 65536, size_t writerBatchSize = 1000);
+    ~TcpDataReceiver() override;
 
     /**
-     * @brief Connects to server and performs a handshake.
-     * 1. Connects TCP.
-     * 2. Sends RequestDataStream.
-     * 3. Waits for ResponseRecRule.
-     * 4. If successful, creates RecBuffer and starts background thread for data.
-     * * @param host Server IP.
-     * @param port Server Port.
-     * @param bufferName Remote buffer name to request.
-     * @return true if buffer exists and stream started, false otherwise.
+     * @brief Подключается к серверу, выполняет handshake и запускает поток.
      */
     bool connect(const std::string& host, uint16_t port, const std::string& bufferName);
 
     /**
-     * @brief Stops reception and disconnects.
+     * @brief Останавливает прием и разрывает соединение.
      */
     void stop();
 
-    /**
-     * @brief Returns the buffer created during the connect phase.
-     * Valid immediately after connect() returns true.
-     */
-    std::shared_ptr<RecBuffer> getBuffer() const;
-
-    /**
-     * @brief Check if connected and receiving.
-     */
     bool isConnected() const;
 
-    // Optional: Callback when connection is lost/finished
-    void setOnFinishedCallback(std::function<void()> cb);
-
-private:
+protected:
     /**
-     * @brief Background loop that handles only incoming DataStreamPayloads.
+     * @brief Возвращает правило, согласованное при connect().
      */
-    void receiveLoop();
+    RecRule defineRule() override;
 
+    /**
+     * @brief Основной цикл работы: Запрос -> Ожидание -> Чтение -> Commit.
+     */
+    void workerLoop() override;
+
+    /**
+     * @brief Хук перед запуском цикла (опционально).
+     */
+    void onProduceStart() override {}
+
+    /**
+     * @brief Хук после остановки цикла.
+     */
+    void onProduceStop() override;
+
+    bool produceStep(Record& rec) override final { return false; }
 private:
     asio::io_context m_ioContext;
     asio::ip::tcp::socket m_socket;
 
-    std::shared_ptr<RecBuffer> m_buffer;
-    size_t m_capacity;
-
-    std::thread m_worker;
-    std::atomic<bool> m_running;
-
-    std::function<void()> m_onFinished;
+    RecRule m_negotiatedRule;
+    bool m_connected;
+    size_t m_writerBatchSize; // Храним желаемый размер батча
 };
 
 } // namespace cyc

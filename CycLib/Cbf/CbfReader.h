@@ -4,7 +4,7 @@
 #ifndef CYC_CBFREADER_H
 #define CYC_CBFREADER_H
 
-#include "RecordProducer.h"
+#include "RecordProducer.h" // Здесь теперь BatchRecordProducer
 #include "CbfDefs.h"
 #include <string>
 #include <fstream>
@@ -12,13 +12,23 @@
 
 namespace cyc {
 
-class CYCLIB_EXPORT CbfReader : public RecordProducer {
+/**
+ * @brief Читает CBF файл и генерирует поток записей.
+ * Использует BatchRecordProducer для прямой записи с диска в буфер обмена.
+ */
+class CYCLIB_EXPORT CbfReader : public BatchRecordProducer {
 public:
+    /**
+     * @param filename Имя файла.
+     * @param bufferCapacity Размер кольцевого буфера.
+     * @param autoStart Запустить чтение сразу.
+     * @param readBatchSize (Устарело/Игнорируется в Batch режиме) - размер блока чтения определятся Writer'ом.
+     * @param writerBatchSize Размер блока записи (и чтения с диска).
+     */
     CbfReader(const std::string& filename,
               size_t bufferCapacity = 100000,
               bool autoStart = true,
-              size_t readBatchSize = 1000,
-              size_t writerBatchSize = 100);
+              size_t writerBatchSize = 1000); // readBatchSize убран, т.к. зависит от writerBatchSize
 
     ~CbfReader() override;
 
@@ -28,34 +38,26 @@ protected:
     RecRule defineRule() override;
 
     /**
-     * @brief Копирует одну запись из внутреннего буфера в rec.
-     * Если внутренний буфер пуст, подгружает новую порцию с диска.
+     * @brief Читает блок данных из файла напрямую в буфер writer'а.
      */
-    bool produceStep(Record& rec) override;
+    size_t produceBatch(const RecordWriter::RecordBatch& batch) override;
 
     void onProduceStop() override;
 
 private:
+    /**
+     * @brief Читает заголовок секции CBF.
+     */
     bool readSectionHeader(CbfSectionHeader& header);
-    bool refillBuffer();
 
 private:
     std::string m_filename;
     std::ifstream m_file;
 
-    // Config
-    size_t m_readBatchSize;
-
     // State
     size_t m_recordSize;
-    std::vector<char> m_readBuffer; // Промежуточный буфер (Disk -> RAM)
-
     bool m_valid;
-    int64_t m_dataBytesRemaining;
-
-    // Управление позицией внутри m_readBuffer
-    size_t m_bufferedRecordsCount; // Сколько полных записей сейчас в буфере
-    size_t m_currentRecordIdx;     // Индекс следующей записи для выдачи
+    int64_t m_dataBytesRemaining; // Сколько байт осталось в текущей Data секции (-1 если бесконечно)
 };
 
 } // namespace cyc

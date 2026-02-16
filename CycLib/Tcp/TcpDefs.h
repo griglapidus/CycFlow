@@ -14,8 +14,9 @@ enum class MessageType : uint8_t {
     RequestRecRule = 3,
     ResponseRecRule = 4,
     RequestDataStream = 5,
-    DataStreamPayload = 6,
-    ResponseError = 7
+    RequestDataBatch = 6 ,
+    ResponseDataBatch = 7,
+    ResponseError = 8
 };
 
 #pragma pack(push, 1)

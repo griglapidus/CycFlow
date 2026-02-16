@@ -55,13 +55,7 @@ public:
      */
     Record nextRecord();
 
-    /**
-     * @brief Возвращает пакет записей (весь остаток активного буфера).
-     *
-     * Если активный буфер пуст, метод ожидает загрузки нового из фонового потока.
-     * После вызова внутренний курсор читателя перемещается в конец буфера.
-     */
-    RecordBatch nextBatch();
+    RecordBatch nextBatch(size_t maxCount = std::numeric_limits<size_t>::max(), bool wait = true);
 
     /**
      * @brief Returns the schema used by this reader.
@@ -103,9 +97,11 @@ public:
     uint64_t getCursor() const { return m_readerCursor.load(); }
 private:
     /**
-     * @brief Swaps the exhausted active buffer with the filled background buffer.
+     * @brief Меняет буферы местами.
+     * @param wait Ждать ли заполнения фонового буфера.
+     * @return true, если буферы успешно поменялись (есть данные). false, если данных нет.
      */
-    bool swapBuffers();
+    bool swapBuffers(bool wait = true);
 
     /**
      * @brief Main loop for the background worker thread.

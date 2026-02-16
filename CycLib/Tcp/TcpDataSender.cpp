@@ -6,50 +6,83 @@
 
 namespace cyc {
 
-TcpDataSender::TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket, size_t batchSize)
-    : BatchRecordConsumer(buffer, batchSize) // Pass batch size to base reader
+TcpDataSender::TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket)
+    : RecordConsumer(buffer)
     , m_socket(std::move(socket))
 {
-    // No internal buffer allocation needed anymore.
 }
 
 TcpDataSender::~TcpDataSender() {
-    // Stop the thread first to ensure no write operations are attempted on a closed socket
     stop();
-
     asio::error_code ec;
     if (m_socket.is_open()) {
         m_socket.close(ec);
     }
 }
 
-void TcpDataSender::consumeBatch(const RecordReader::RecordBatch& batch) {
-    if (!batch.isValid() || batch.count == 0) return;
+void TcpDataSender::workerLoop() {
+    onConsumeStart();
 
     asio::error_code ec;
 
-    // 1. Calculate payload size
-    size_t payloadSize = batch.count * batch.recordSize;
+    while (isRunning() && m_socket.is_open()) {
 
-    // 2. Prepare Header
-    TcpHeader header;
-    header.type = MessageType::DataStreamPayload;
-    header.payloadSize = static_cast<uint32_t>(payloadSize);
+        TcpHeader reqHeader;
+        asio::read(m_socket, asio::buffer(&reqHeader, sizeof(TcpHeader)), ec);
 
-    // 3. Prepare Scatter-Gather buffers
-    // We send Header + Data in one go.
-    std::vector<asio::const_buffer> buffers;
-    buffers.push_back(asio::buffer(&header, sizeof(TcpHeader)));
-    buffers.push_back(asio::buffer(batch.data, payloadSize));
+        if (ec) {
+            if (ec != asio::error::eof && m_socket.is_open()) {
+                std::cerr << "TcpDataSender: Read request error: " << ec.message() << std::endl;
+            }
+            break;
+        }
 
-    // 4. Write to socket
-    asio::write(m_socket, buffers, ec);
+        if (reqHeader.signature != 0x43594300 || reqHeader.type != MessageType::RequestDataBatch) {
+            std::cerr << "TcpDataSender: Invalid header or type: " << (int)reqHeader.type << std::endl;
+            break;
+        }
 
-    if (ec) {
-        // If write fails (e.g. client disconnected), stop the consumer loop
-        std::cerr << "TcpDataSender: Write error: " << ec.message() << std::endl;
-        stop();
+        uint32_t maxBytesRequested = reqHeader.payloadSize;
+        size_t recordSize = m_reader->getRule().getRecSize();
+        size_t maxRecordsToRead = (recordSize > 0) ? (maxBytesRequested / recordSize) : 0;
+
+        if (maxRecordsToRead == 0) {
+            TcpHeader resp;
+            resp.type = MessageType::ResponseDataBatch;
+            resp.payloadSize = 0;
+            asio::write(m_socket, asio::buffer(&resp, sizeof(TcpHeader)), ec);
+            continue;
+        }
+
+        // ВАЖНО: wait = false
+        // Если данных нет, batch.count будет 0, мы отправим пустой ответ,
+        // и TcpDataReceiver уйдет в sleep.
+        auto batch = m_reader->nextBatch(maxRecordsToRead, false);
+
+        size_t bytesToSend = batch.count * batch.recordSize;
+
+        TcpHeader respHeader;
+        respHeader.type = MessageType::ResponseDataBatch;
+        respHeader.payloadSize = static_cast<uint32_t>(bytesToSend);
+
+        std::vector<asio::const_buffer> buffers;
+        buffers.push_back(asio::buffer(&respHeader, sizeof(TcpHeader)));
+
+        if (bytesToSend > 0) {
+            buffers.push_back(asio::buffer(batch.data, bytesToSend));
+        }
+
+        asio::write(m_socket, buffers, ec);
+
+        if (ec) {
+            if (m_socket.is_open()) {
+                std::cerr << "TcpDataSender: Write response error: " << ec.message() << std::endl;
+            }
+            break;
+        }
     }
+
+    onConsumeStop();
 }
 
 } // namespace cyc

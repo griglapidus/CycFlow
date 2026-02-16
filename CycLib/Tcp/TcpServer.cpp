@@ -6,6 +6,7 @@
 #include "TcpDefs.h"
 #include <thread>
 #include <vector>
+#include <iostream> // Добавлено для логов ошибок, если нужно
 
 namespace cyc {
 
@@ -51,6 +52,7 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                     listStr += pair.first + "\n";
                 }
             }
+            // Проверка возврата, хотя после break мы все равно выходим
             MessageUtils::sendMessage(socket, MessageType::ResponseBufferList, listStr, ec);
             break;
         }
@@ -88,15 +90,20 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
 
             if (targetBuffer) {
                 std::string ruleText = targetBuffer->getRule().toText();
-                MessageUtils::sendMessage(socket, MessageType::ResponseRecRule, ruleText, ec);
-                if (ec) return;
+
+                // ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL
+                if (!MessageUtils::sendMessage(socket, MessageType::ResponseRecRule, ruleText, ec)) {
+                    // Если не удалось отправить подтверждение, разрываем связь
+                    return;
+                }
 
                 cleanupDeadSenders();
+
+                // Создаем sender
                 auto sender = std::make_shared<TcpDataSender>(
                     targetBuffer,
-                    std::move(socket),
-                    100
-                    );
+                    std::move(socket)
+                );
 
                 {
                     std::lock_guard<std::mutex> lock(m_sendersMtx);

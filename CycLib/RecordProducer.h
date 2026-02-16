@@ -89,15 +89,15 @@ protected:
      */
     RecordWriter& getWriter();
 
+    virtual void workerLoop();
+
 private:
     /**
      * @brief Создает RecBuffer и RecordWriter, вызывая defineRule().
      */
     void initialize();
 
-    void workerLoop();
-
-private:
+protected:
     // Config
     size_t m_bufferCapacity;
     size_t m_writerBatchSize;
@@ -111,6 +111,31 @@ private:
 
     std::mutex m_initMtx; // Защита для lazy initialization
     bool m_isInitialized;
+};
+
+class CYCLIB_EXPORT BatchRecordProducer : public RecordProducer {
+public:
+    using RecordProducer::RecordProducer; // Наследуем конструктор
+
+protected:
+    /**
+     * @brief Заглушка для поштучного метода.
+     * Не должен вызываться в пакетном режиме.
+     */
+    bool produceStep(Record& rec) override final { return false; }
+
+    /**
+     * @brief Метод для генерации пакета данных.
+     * @param batch Структура, содержащая указатель на память и доступную емкость.
+     * @return Количество фактически записанных записей.
+     * Если вернуть 0, генерация остановится.
+     */
+    virtual size_t produceBatch(const RecordWriter::RecordBatch& batch) = 0;
+
+    /**
+     * @brief Переопределенный цикл для пакетной работы.
+     */
+    void workerLoop() override;
 };
 
 } // namespace cyc

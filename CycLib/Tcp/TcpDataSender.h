@@ -5,7 +5,7 @@
 #define CYC_TCPDATASENDER_H
 
 #include "Core/CycLib_global.h"
-#include "RecordConsumer.h" // Здесь определен BatchRecordConsumer
+#include "RecordConsumer.h"
 #include "TcpDefs.h"
 #include <asio.hpp>
 #include <vector>
@@ -13,30 +13,23 @@
 namespace cyc {
 
 /**
- * @brief Reads records from a RecBuffer and streams them over a TCP socket.
- * Uses BatchRecordConsumer to send raw memory blocks directly to the socket,
- * minimizing memory copying.
+ * @brief Serves data requests from a connected client.
+ * Inherits RecordConsumer to manage the Reader lifecycle, but overrides
+ * the loop to act as a Server (Request-Response).
  */
-class CYCLIB_EXPORT TcpDataSender : public BatchRecordConsumer {
+class CYCLIB_EXPORT TcpDataSender : public RecordConsumer {
 public:
-    /**
-     * @brief Constructs the sender.
-     * @param buffer Source RecBuffer to read from.
-     * @param socket Connected TCP socket (transferred ownership).
-     * @param batchSize Number of records to read and send in one chunk.
-     */
-    TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket, size_t batchSize = 100);
-
+    TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket);
     virtual ~TcpDataSender();
 
 protected:
     /**
-     * @brief Called by the worker thread for each batch of records.
-     * Constructs a TCP packet header and sends it along with the raw batch data.
+     * @brief Custom loop to handle request-response cycle.
+     * Waits for RequestDataBatch -> Reads from Reader -> Sends Response.
      */
-    void consumeBatch(const RecordReader::RecordBatch& batch) override;
+    void workerLoop() override;
 
-    // consumeRecord is not used in BatchRecordConsumer (it is final empty)
+    void consumeRecord(const Record& rec) override {}
 
 private:
     asio::ip::tcp::socket m_socket;

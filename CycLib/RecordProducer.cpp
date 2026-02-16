@@ -94,4 +94,28 @@ void RecordProducer::workerLoop() {
     onProduceStop();
 }
 
+void BatchRecordProducer::workerLoop() {
+    onProduceStart();
+
+    while (m_running.load()) {
+        auto batch = m_writer->nextBatch();
+
+        if (!batch.isValid()) {
+            break;
+        }
+
+        size_t writtenCount = produceBatch(batch);
+
+        if (writtenCount > 0) {
+            m_writer->commitBatch(writtenCount);
+        } else {
+            break;
+        }
+    }
+
+    m_writer->flush();
+    m_running.store(false);
+    onProduceStop();
+}
+
 } // namespace cyc

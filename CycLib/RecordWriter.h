@@ -11,7 +11,6 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <cassert>
 #include <atomic>
 
 namespace cyc {
@@ -66,32 +65,48 @@ public:
      */
     void commitRecord();
 
+    // ==========================================
+    // Batch API
+    // ==========================================
+
+    /**
+     * @brief Структура для прямого доступа к буферу записи.
+     */
+    struct RecordBatch {
+        uint8_t* data;       ///< Указатель на начало свободного места
+        size_t capacity;     ///< Сколько записей можно записать (доступное место)
+        const RecRule& rule; ///< Схема данных
+        size_t recordSize;   ///< Размер одной записи
+
+        bool isValid() const { return data != nullptr && capacity > 0; }
+    };
+
+    /**
+     * @brief Возвращает доступный блок памяти для пакетной записи.
+     * * Если в текущем буфере нет места, метод форсирует сброс (swapBuffers)
+     * и возвращает новый чистый буфер.
+     * * @return Структура RecordBatch с указателем на память.
+     */
+    RecordBatch nextBatch();
+
+    /**
+     * @brief Подтверждает запись count элементов.
+     * * Продвигает внутренний курсор. Если буфер заполнился, он будет сброшен
+     * при следующем вызове nextRecord/nextBatch или flush.
+     * * @param count Количество фактически записанных элементов.
+     */
+    void commitBatch(size_t count);
+
+    // ==========================================
+
     /**
      * @brief Forcefully pushes all pending data to the target buffer.
-     *
-     * Blocks the calling thread until the background worker has finished
-     * processing the current queue.
      */
     void flush();
 
 private:
-    /**
-     * @brief Signals the worker thread to stop processing.
-     */
     void stop();
-
-    /**
-     * @brief Swaps the active and background buffers.
-     * @param blocking If true, waits for the worker to finish the previous batch.
-     * If false, returns immediately if worker is busy or mutex is locked.
-     * @return True if swapped, false if skipped (only applicable when blocking=false).
-     */
     bool swapBuffers(bool blocking);
-
-    /**
-     * @brief Main loop for the background worker thread.
-     * Waits for the 'hasWork' signal and pushes the background buffer to RecBuffer.
-     */
     void workerLoop();
 
 private:
@@ -103,6 +118,7 @@ private:
     bool m_blockOnFull;
 
     size_t m_currentIdx;     ///< Current index in the active buffer.
+    int m_timestampId;
 
     std::vector<uint8_t> m_bufferA;
     std::vector<uint8_t> m_bufferB;

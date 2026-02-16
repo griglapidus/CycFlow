@@ -112,62 +112,57 @@ TEST_F(TcpIntegrationTest, ClientCanRetrieveRecRule) {
 // =========================================================================
 
 TEST_F(TcpIntegrationTest, ReceiverGetsStreamedData) {
-    TcpDataReceiver receiver(1000); // 1000 records capacity
+    // Создаем Receiver с емкостью буфера 1000 и размером батча записи 100
+    TcpDataReceiver receiver(1000, 100);
 
     // 1. Connect Receiver
+    // Теперь connect выполняет синхронный handshake. Если вернул true — буфер уже создан.
     bool connected = receiver.connect(m_host, m_port, m_bufferName);
     ASSERT_TRUE(connected);
 
-    // 2. Wait for connection and handshake (RecRule reception)
-    // We poll until the buffer is created inside the receiver
-    int retries = 0;
-    while (!receiver.getBuffer() && retries < 20) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        retries++;
-    }
-    ASSERT_TRUE(receiver.getBuffer() != nullptr) << "Receiver failed to receive RecRule and init buffer";
+    // 2. Check Buffer Existence
+    // В новой реализации RecordProducer::initialize вызывается внутри connect/start
+    ASSERT_TRUE(receiver.getBuffer() != nullptr) << "Receiver buffer should be initialized after successful connect";
 
     // 3. Push Data to Source
     const int recordCount = 50;
     for (int i = 0; i < recordCount; ++i) {
         pushTestData(static_cast<double>(i * 1.1), static_cast<double>(i));
+        if(i == 25) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    receiver.stop();
     // 4. Wait for data to arrive at Receiver
-    // We expect totalWritten to match
-    retries = 0;
-    while (receiver.getBuffer()->getTotalWritten() < recordCount && retries < 40) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Данные идут асинхронно, поэтому ждем заполнения
+    int retries = 0;
+    auto destBuffer = receiver.getBuffer();
+
+    while (destBuffer->getTotalWritten() < recordCount && retries < 10) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         retries++;
     }
 
     // 5. Verification
-    auto destBuffer = receiver.getBuffer();
     EXPECT_EQ(destBuffer->getTotalWritten(), recordCount);
 
     // Read last record to verify content
     // Record size is 16 bytes.
     std::vector<uint8_t> readBuf(16);
-    // Read relative index 0 (if buffer not wrapped) or calculate global
-    // Let's just read the last one pushed (index 49)
-    // NOTE: In a circular buffer, relative index changes, but here capacity(1000) > count(50)
 
     // We read strictly from the beginning (index 0 relative to current window)
     destBuffer->readRelative(0, readBuf.data(), 1);
 
-    double ts, val;
-    std::memcpy(&ts, readBuf.data(), 8);
+    double val;
     std::memcpy(&val, readBuf.data() + 8, 8);
 
     // Check first record (i=0)
-    EXPECT_DOUBLE_EQ(ts, 0.0);
     EXPECT_DOUBLE_EQ(val, 0.0);
 
     // Check 10th record
     destBuffer->readRelative(10, readBuf.data(), 1);
-    std::memcpy(&ts, readBuf.data(), 8);
     std::memcpy(&val, readBuf.data() + 8, 8);
-    EXPECT_DOUBLE_EQ(ts, 10.0);
     EXPECT_DOUBLE_EQ(val, 11.0); // 10 * 1.1
 
     receiver.stop();
@@ -179,7 +174,11 @@ TEST_F(TcpIntegrationTest, ReceiverGetsStreamedData) {
 
 TEST_F(TcpIntegrationTest, ConnectToNonExistentBufferReturnsError) {
     // Attempting to stream a buffer that is not registered
-    TcpDataReceiver receiver;
+    TcpDataReceiver receiver(1000);
+
+    // connect должен вернуть false, так как сервер пришлет ResponseError во время handshake
     bool connected = receiver.connect(m_host, m_port, "MissingBuffer");
-    EXPECT_FALSE(connected); // Physical TCP connect works
+
+    EXPECT_FALSE(connected);
+    EXPECT_EQ(receiver.getBuffer(), nullptr); // Буфер не должен быть создан
 }

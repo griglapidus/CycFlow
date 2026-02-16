@@ -15,7 +15,7 @@ namespace cyc {
 
 class CYCLIB_EXPORT MessageUtils {
 public:
-    static void sendMessage(asio::ip::tcp::socket& socket, MessageType type, const std::string& payload, asio::error_code& ec) {
+    static bool sendMessage(asio::ip::tcp::socket& socket, MessageType type, const std::string& payload, asio::error_code& ec) {
         TcpHeader header;
         header.type = type;
         header.payloadSize = static_cast<uint32_t>(payload.size());
@@ -27,7 +27,11 @@ public:
             buffers.push_back(asio::buffer(payload));
         }
 
+        // asio::write записывает данные и выставляет ec в случае ошибки
         asio::write(socket, buffers, ec);
+
+        // Возвращаем true, если ошибки нет (!ec равносильно ec == 0)
+        return !ec;
     }
 
     static bool receiveMessage(asio::ip::tcp::socket& socket, TcpHeader& header, std::vector<uint8_t>& payload, asio::error_code& ec) {

@@ -78,8 +78,7 @@ TEST_F(CbfReaderTest, ReadValidFileEndToEnd) {
     // bufferCapacity: емкость создаваемого буфера
     // autoStart: true (сразу запускает поток)
     // readBatchSize: 50 (читает с диска по 50 записей за раз)
-    // writerBatchSize: 10 (пишет в RecBuffer по 10)
-    CbfReader reader(testFileName, 2000, true, 50, 10);
+    CbfReader reader(testFileName, 2000, true, 50);
     // 3. Ждем завершения чтения
     // Так как это файл, reader остановится сам, когда дойдет до EOF
     reader.join();

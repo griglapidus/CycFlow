@@ -48,19 +48,32 @@ Record RecordReader::nextRecord() {
     return Record(m_rule, ptr);
 }
 
-RecordReader::RecordBatch RecordReader::nextBatch()
+RecordReader::RecordBatch RecordReader::nextBatch(size_t maxCount, bool wait)
 {
-    if (m_activeIdx >= m_activeCount) {
-        if (!swapBuffers()) {
-            return {nullptr, 0, m_rule, m_recSize};
-        }
+    // 1. Проверяем, есть ли данные в текущем активном буфере
+    size_t availableInActive = m_activeCount - m_activeIdx;
+
+    if (availableInActive > 0) {
+        size_t countToReturn = std::min(availableInActive, maxCount);
+        uint8_t* ptr = m_activeBuf->data() + (m_activeIdx * m_recSize);
+        m_activeIdx += countToReturn;
+        return {ptr, countToReturn, m_rule, m_recSize};
     }
 
-    uint8_t* ptr = m_activeBuf->data() + (m_activeIdx * m_recSize);
-    size_t remaining = m_activeCount - m_activeIdx;
-    m_activeIdx = m_activeCount;
+    // 2. Активный буфер пуст. Пытаемся поменять буферы.
+    // Передаем параметр wait: если false, swapBuffers вернет false при отсутствии данных.
+    if (!swapBuffers(wait)) {
+        // Данных нет (или остановка)
+        return {nullptr, 0, m_rule, m_recSize};
+    }
 
-    return {ptr, remaining, m_rule, m_recSize};
+    // 3. Свап прошел успешно, данные появились
+    size_t available = m_activeCount; // m_activeIdx сброшен в 0 внутри swapBuffers
+    size_t countToReturn = std::min(available, maxCount);
+    uint8_t* ptr = m_activeBuf->data();
+    m_activeIdx = countToReturn;
+
+    return {ptr, countToReturn, m_rule, m_recSize};
 }
 
 void RecordReader::notifyDataAvailable() {
@@ -96,10 +109,17 @@ bool RecordReader::hasData() const
     return m_bgIsFull;
 }
 
-bool RecordReader::swapBuffers() {
+bool RecordReader::swapBuffers(bool wait) {
     std::unique_lock<std::mutex> lock(m_mtx);
-    while (m_bgCount == 0 && m_running) {
-        m_cv_user.wait(lock);
+
+    if (wait) {
+        while (m_bgCount == 0 && m_running) {
+            m_cv_user.wait(lock);
+        }
+    } else {
+        if (m_bgCount == 0) {
+            return false;
+        }
     }
 
     if (!m_running && !m_bgIsFull) return false;

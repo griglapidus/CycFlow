@@ -22,9 +22,10 @@ std::vector<std::string> TcpServiceClient::requestBufferList(const std::string& 
     asio::connect(socket, endpoints, ec);
     if (ec) return {};
 
-    // Send the request
-    MessageUtils::sendMessage(socket, MessageType::RequestBufferList, "", ec);
-    if (ec) return {};
+    // Send the request (ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL)
+    if (!MessageUtils::sendMessage(socket, MessageType::RequestBufferList, "", ec)) {
+        return {};
+    }
 
     // Receive the response
     TcpHeader header;
@@ -47,7 +48,6 @@ std::vector<std::string> TcpServiceClient::requestBufferList(const std::string& 
         }
     }
 
-    // Socket goes out of scope and disconnects automatically
     return result;
 }
 
@@ -64,9 +64,10 @@ std::string TcpServiceClient::requestRecRule(const std::string& host, uint16_t p
     asio::connect(socket, endpoints, ec);
     if (ec) return "";
 
-    // Send the request with the buffer name as payload
-    MessageUtils::sendMessage(socket, MessageType::RequestRecRule, bufferName, ec);
-    if (ec) return "";
+    // Send the request (ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL)
+    if (!MessageUtils::sendMessage(socket, MessageType::RequestRecRule, bufferName, ec)) {
+        return "";
+    }
 
     // Receive the response
     TcpHeader header;
@@ -79,7 +80,6 @@ std::string TcpServiceClient::requestRecRule(const std::string& host, uint16_t p
         return std::string(payload.begin(), payload.end());
     }
 
-    // In case of MessageType::ResponseError or parsing failure
     return "";
 }
 
