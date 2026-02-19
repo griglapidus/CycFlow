@@ -524,6 +524,14 @@ public:
         --m_size;
     }
 
+    const_pointer get_ptr_unsafe(size_type index) const {
+        return m_array + ((m_head + index) % m_capacity);
+    }
+
+    size_type get_head_index_unsafe() const {
+        return m_head;
+    }
+
 private:
     // Helper to get iterators without locking (for internal use in constructors)
     iterator begin_unsafe() { return iterator(this, 0); }

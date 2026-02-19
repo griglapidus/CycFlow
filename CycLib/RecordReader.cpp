@@ -22,7 +22,7 @@ RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     uint64_t totalWritten = std::get<0>(totalAndSize);
     size_t currentBufferSize = std::get<1>(totalAndSize);
     m_readerCursor = totalWritten - currentBufferSize;
-    m_target->addReaderForNotification(this);
+    m_target->addClient(this);
 
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
@@ -33,7 +33,7 @@ RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 }
 
 RecordReader::~RecordReader() {
-    m_target->removeReaderForNotification(this);
+    m_target->removeClient(this);
     stop();
 }
 

@@ -3,7 +3,6 @@
 
 #include "RecBuffer.h"
 #include <assert.h>
-#include "RecordReader.h"
 
 namespace cyc {
 
@@ -19,12 +18,36 @@ void RecBuffer::push(const void *data, size_t count) {
         std::unique_lock<std::shared_mutex> lock(m_dataRwMtx);
         m_impl.push(data, count);
     }
-    notifyReaders();
+    notifyClients();
 }
 
 void RecBuffer::readRelative(size_t index, void *dest, size_t count) const {
     std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
     m_impl.readAt(index, dest, count);
+}
+
+void RecBuffer::processRecord(size_t index, std::function<void (const Record &)> visitor) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
+
+    if (index >= m_impl.size()) {
+        Record emptyRec(m_rule, nullptr);
+        visitor(emptyRec);
+        return;
+    }
+
+    auto [ptr, isSplit] = m_impl.getChunkPtr(index);
+
+    if (!isSplit) {
+        Record rec(m_rule, const_cast<uint8_t*>(ptr));
+        visitor(rec);
+    } else {
+        std::vector<uint8_t> tempBuf(m_rule.getRecSize());
+        m_impl.readAt(index, tempBuf.data(), 1);
+
+        Record rec(m_rule, tempBuf.data());
+        visitor(rec);
+    }
 }
 
 const RecRule &RecBuffer::getRule() const { return m_rule; }
@@ -52,41 +75,23 @@ std::tuple<uint64_t, size_t> RecBuffer::getTotalWrittenAndSize() const
     return std::make_tuple(m_impl.getTotalWritten(), m_impl.size());
 }
 
-void RecBuffer::addReaderForNotification(RecordReader *reader)
+void RecBuffer::addClient(IRecBufferClient* client)
 {
     std::lock_guard<std::mutex> lock(m_syncMtx);
-    auto readerIt = std::find(m_readers.begin(), m_readers.end(), reader);
-    if(readerIt == m_readers.end()) {
-        m_readers.push_back(reader);
+    auto it = std::find(m_clients.begin(), m_clients.end(), client);
+    if (it == m_clients.end()) {
+        m_clients.push_back(client);
     }
 }
 
-void RecBuffer::removeReaderForNotification(RecordReader *reader)
+void RecBuffer::removeClient(IRecBufferClient* client)
 {
     std::lock_guard<std::mutex> lock(m_syncMtx);
-    auto readerIt = std::find(m_readers.begin(), m_readers.end(), reader);
-    if(readerIt != m_readers.end()) {
-        m_readers.erase(readerIt);
+    auto it = std::find(m_clients.begin(), m_clients.end(), client);
+    if (it != m_clients.end()) {
+        m_clients.erase(it);
     }
     notifyWriters();
-}
-
-void RecBuffer::addWriter(RecordWriter *writer)
-{
-    std::lock_guard<std::mutex> lock(m_syncMtx);
-    auto it = std::find(m_writers.begin(), m_writers.end(), writer);
-    if(it == m_writers.end()) {
-        m_writers.push_back(writer);
-    }
-}
-
-void RecBuffer::removeWriter(RecordWriter *writer)
-{
-    std::lock_guard<std::mutex> lock(m_syncMtx);
-    auto it = std::find(m_writers.begin(), m_writers.end(), writer);
-    if(it != m_writers.end()) {
-        m_writers.erase(it);
-    }
 }
 
 size_t RecBuffer::getAvailableWriteSpace() const
@@ -103,11 +108,11 @@ void RecBuffer::waitForSpace(std::function<bool ()> stopCondition)
     });
 }
 
-void RecBuffer::notifyReaders() const
+void RecBuffer::notifyClients() const
 {
     std::lock_guard<std::mutex> lock(m_syncMtx);
-    for(auto *reader:m_readers) {
-        reader->notifyDataAvailable();
+    for(auto *client:m_clients) {
+        client->notifyDataAvailable();
     }
 }
 
@@ -136,14 +141,16 @@ size_t RecBuffer::getAvailableWriteSpace_nolock() const
 
 uint64_t RecBuffer::calculateMinReadCursor_nolock() const
 {
-    if (m_readers.empty()) {
+    if (m_clients.empty()) {
         return m_phantomReadCursor;
     }
 
     uint64_t minCursor = UINT64_MAX;
-    for (const auto* r : m_readers) {
-        uint64_t c = r->getCursor();
-        if (c < minCursor) minCursor = c;
+    for (const auto* client : m_clients) {
+        uint64_t c = client->getCursor();
+        if (c != UINT64_MAX && c < minCursor) {
+            minCursor = c;
+        }
     }
 
     if (minCursor == UINT64_MAX) {

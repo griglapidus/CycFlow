@@ -65,6 +65,29 @@ public:
     }
 
     /**
+     * @brief Возвращает пару {указатель, флаг_разрыва}.
+     * Если isSplit == true, значит данные разорваны и прямой доступ невозможен.
+     */
+    std::pair<const uint8_t*, bool> getChunkPtr(size_t index) const {
+        // 1. Считаем смещение в байтах
+        size_t byteIndex = index * m_chunkSize;
+
+        // 2. Получаем указатель на начало данных
+        const uint8_t* ptr = m_buffer.get_ptr_unsafe(byteIndex);
+
+        // 3. Проверяем, не вылезает ли конец чанка за границу физического массива
+        size_t capacityBytes = m_buffer.capacity(); // CircularBuffer capacity is mostly size here if T=uint8_t
+        size_t head = m_buffer.get_head_index_unsafe();
+
+        // Физический старт относительно начала массива
+        size_t physicalStart = (head + byteIndex) % capacityBytes;
+
+        bool isSplit = (physicalStart + m_chunkSize) > capacityBytes;
+
+        return {ptr, isSplit};
+    }
+
+    /**
      * @brief Gets the total number of chunks written since creation.
      * Thread-safe (atomic load with acquire semantics).
      * @return Total count.

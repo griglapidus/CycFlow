@@ -6,6 +6,7 @@
 
 #include "Core/RecBuffer.h"
 #include "Core/Record.h"
+#include "Core/IRecBufferClient.h"
 
 #include <vector>
 #include <thread>
@@ -22,7 +23,7 @@ namespace cyc {
  * Minimizes read latency by fetching the next batch of records from the
  * RecBuffer in a background thread while the user processes the current batch.
  */
-class CYCLIB_EXPORT RecordReader {
+class CYCLIB_EXPORT RecordReader : public IRecBufferClient {
 public:
     struct RecordBatch {
         const uint8_t* data;
@@ -68,7 +69,7 @@ public:
      * Typically called by a writer or an event loop when the underlying RecBuffer
      * receives new data. Wakes up the worker thread if it was idle.
      */
-    void notifyDataAvailable();
+    void notifyDataAvailable() override;
 
     /**
      * @brief Stops the background worker.
@@ -94,7 +95,7 @@ public:
      * @brief Returns the total number of records processed by this reader.
      * Thread-safe.
      */
-    uint64_t getCursor() const { return m_readerCursor.load(); }
+    uint64_t getCursor() const override { return m_readerCursor.load(); }
 private:
     /**
      * @brief Меняет буферы местами.

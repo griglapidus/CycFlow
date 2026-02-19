@@ -49,7 +49,8 @@ set(HEADERS
 
 add_library(CycLib ${SOURCES} ${HEADERS}
     Tcp/TcpDataSender.h Tcp/TcpDataSender.cpp
-    Tcp/TcpDataReceiver.h Tcp/TcpDataReceiver.cpp)
+    Tcp/TcpDataReceiver.h Tcp/TcpDataReceiver.cpp
+    Core/IRecBufferClient.h)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 
@@ -96,10 +97,3 @@ install(TARGETS
 
 set_target_properties(CycLib PROPERTIES OUTPUT_NAME "Cyc")
 set_target_properties(CycLib PROPERTIES DEBUG_POSTFIX "_d")
-
-# Tip: Auto-install in POST_BUILD can slow down development,
-# if the project is large, but for a small library this is acceptable.
-add_custom_command(TARGET CycLib POST_BUILD
-    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}" --config $<CONFIG>
-    COMMENT "Auto-installing CycLib..."
-)

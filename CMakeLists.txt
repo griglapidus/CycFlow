@@ -39,7 +39,7 @@ set(HEADER_DEST_DIR "${CMAKE_SOURCE_DIR}/build/include")
 
 add_subdirectory(CycLib)
 
-option(BUILD_TESTING "Build tests" ON)
+option(BUILD_TESTING "Build tests" OFF)
 
 if(BUILD_TESTING)
     enable_testing()

@@ -5,7 +5,6 @@
 #include "Core/PReg.h"
 #include <algorithm>
 #include <cstring>
-#include <iostream>
 
 namespace cyc {
 
@@ -21,10 +20,6 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     , m_running(true)
     , m_hasWork(false)
 {
-    if (m_blockOnFull) {
-        m_target->addWriter(this);
-    }
-
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
     m_activeBuf = &m_bufferA;
@@ -37,10 +32,6 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 
 RecordWriter::~RecordWriter() {
     stop();
-    // removeWriter вызывается в stop() или здесь, но лучше гарантированно:
-    if (m_blockOnFull) {
-        m_target->removeWriter(this);
-    }
 }
 
 // --- Single Record API ---

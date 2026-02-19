@@ -6,14 +6,13 @@
 
 #include "CycLib_global.h"
 #include "DynamicChunkBuffer.h"
+#include "IRecBufferClient.h"
 #include "RecRule.h"
 #include <condition_variable>
 #include <functional>
+#include "Record.h"
 
 namespace cyc {
-
-class RecordReader;
-class RecordWriter;
 
 /**
  * @brief High-level storage class for structured records.
@@ -61,6 +60,14 @@ public:
     void readRelative(size_t index, void* dest, size_t count) const;
 
     /**
+     * @brief Предоставляет доступ к записи по индексу без копирования (где это возможно).
+     * @param index Относительный индекс записи (0..size-1).
+     * @param visitor Функция-калбек, которая примет Record.
+     * ВНИМАНИЕ: Record валиден только внутри callback'а! Не сохраняйте указатель из него.
+     */
+    void processRecord(size_t index, std::function<void(const Record&)> visitor) const;
+
+    /**
      * @brief Gets the rule defining the record structure.
      * @return Reference to RecRule.
      */
@@ -93,12 +100,8 @@ public:
 
     std::tuple<uint64_t, size_t> getTotalWrittenAndSize() const;
 
-    // --- Reader Management ---
-    void addReaderForNotification(RecordReader* reader);
-    void removeReaderForNotification(RecordReader* reader);
-    // --- Writer Management ---
-    void addWriter(RecordWriter* writer);
-    void removeWriter(RecordWriter* writer);
+    void addClient(IRecBufferClient* client);
+    void removeClient(IRecBufferClient* client);
 
     /**
      * @brief Calculates how many records can be written without overwriting unread data.
@@ -120,7 +123,7 @@ public:
     void notifyWriters();
 
 private:
-    void notifyReaders() const;
+    void notifyClients() const;
     size_t getAvailableWriteSpace_nolock() const;
     uint64_t calculateMinReadCursor_nolock() const;
 
@@ -128,8 +131,7 @@ private:
     RecRule m_rule;
     DynamicChunkBuffer m_impl;
     mutable std::shared_mutex m_dataRwMtx;
-    std::vector<RecordReader*> m_readers;
-    std::vector<RecordWriter*> m_writers;
+    std::vector<IRecBufferClient*> m_clients;
     mutable uint64_t m_phantomReadCursor;
     mutable std::mutex m_syncMtx;
     std::condition_variable m_spaceCv;
