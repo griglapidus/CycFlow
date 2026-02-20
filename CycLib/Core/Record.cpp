@@ -10,33 +10,34 @@ Record::Record(const RecRule& r, void* ptr)
     : m_rule(r), m_data(static_cast<uint8_t*>(ptr))
 {}
 
-bool Record::isValid() const { return m_data != nullptr; }
-void Record::setData(void* ptr) { m_data = static_cast<uint8_t*>(ptr); }
+bool Record::isValid() const {
+    return m_data != nullptr;
+}
 
-void Record::clear()
-{
+void Record::setData(void* ptr) {
+    m_data = static_cast<uint8_t*>(ptr);
+}
+
+void Record::clear() {
     if (isValid()) {
         std::memset(m_data, 0, m_rule.getRecSize());
     }
 }
 
-size_t Record::getSize() const
-{
+size_t Record::getSize() const {
     return m_rule.getRecSize();
 }
 
-void *Record::data() {
+void* Record::data() {
     return m_data;
 }
 
-const void *Record::data() const
-{
+const void* Record::data() const {
     return m_data;
 }
+
 void* Record::getVoid(int id) const {
-    if (!isValid()) {
-        return nullptr;
-    }
+    if (!isValid()) return nullptr;
     return m_data + m_rule.getOffsetById(id);
 }
 

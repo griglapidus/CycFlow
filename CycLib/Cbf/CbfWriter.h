@@ -4,24 +4,26 @@
 #ifndef CYC_CBFWRITER_H
 #define CYC_CBFWRITER_H
 
-#include "RecordConsumer.h" // Здесь теперь определен BatchRecordConsumer
+#include "RecordConsumer.h"
 #include "CbfFile.h"
-#include <string>
 
 namespace cyc {
 
 /**
- * @brief Асинхронный писатель данных в формате CBF.
- * Использует пакетный режим (BatchRecordConsumer) для эффективной записи
- * больших блоков данных на диск.
+ * @class CbfWriter
+ * @brief Asynchronous writer for dumping records to CBF format.
+ *
+ * Employs a BatchRecordConsumer architecture to perform highly efficient,
+ * zero-copy block writes directly from the internal buffer memory to the file.
  */
 class CYCLIB_EXPORT CbfWriter : public BatchRecordConsumer {
 public:
     /**
-     * @param filename Путь к выходному файлу.
-     * @param buffer Источник данных.
-     * @param autoStart Запустить поток записи сразу после создания.
-     * @param batchSize Размер внутреннего буфера чтения (в записях).
+     * @brief Constructs the CBF writer.
+     * @param filename Path to the output file.
+     * @param buffer Source RecBuffer to read from.
+     * @param autoStart Automatically start the worker thread.
+     * @param batchSize Number of records to retrieve and write per chunk.
      */
     CbfWriter(const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
@@ -31,29 +33,24 @@ public:
     ~CbfWriter() override;
 
     /**
-     * @brief Устанавливает псевдоним, который будет записан в заголовки секций файла.
-     * Должен быть вызван до начала записи (start).
+     * @brief Sets an alias that will be embedded into the file headers.
+     * Must be called before the writing begins.
      */
     void setAlias(const std::string& alias);
 
 protected:
-    // --- Методы жизненного цикла RecordConsumer ---
-
     /**
-     * @brief Вызывается в рабочем потоке перед началом цикла.
-     * Открывает файл, пишет схему и начинает секцию данных.
+     * @brief Prepares the file, writes the header and opens the data section.
      */
     void onConsumeStart() override;
 
     /**
-     * @brief Обрабатывает пакет записей.
-     * Пишет весь блок памяти в файл за одну операцию.
+     * @brief Writes a contiguous memory block to the file in a single IO call.
      */
     void consumeBatch(const RecordReader::RecordBatch& batch) override;
 
     /**
-     * @brief Вызывается после остановки цикла (или при ошибке).
-     * Завершает секцию данных и закрывает файл.
+     * @brief Finalizes the file (closes data section and stream).
      */
     void onConsumeStop() override;
 

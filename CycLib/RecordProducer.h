@@ -8,133 +8,132 @@
 #include "Core/RecBuffer.h"
 #include "RecordWriter.h"
 #include "Core/RecRule.h"
-#include <atomic>
-#include <thread>
-#include <memory>
-#include <mutex>
 
 namespace cyc {
 
 /**
- * @brief Абстрактный базовый класс для генерации данных.
+ * @class RecordProducer
+ * @brief Abstract base class for generating data records.
  *
- * Сам создает RecBuffer на основе правила, которое возвращает наследник через defineRule().
- * Использует отложенную инициализацию (буфер создается при первом использовании).
+ * Lazily initializes a RecBuffer and a RecordWriter based on the schema
+ * provided by the subclass via `defineRule()`. Manages a background thread
+ * to continuously produce data.
  */
 class CYCLIB_EXPORT RecordProducer {
 public:
     /**
-     * @brief Конструктор.
-     * @note RecBuffer НЕ создается здесь, так как нельзя вызывать виртуальные функции в конструкторе.
-     * @param bufferCapacity Размер создаваемого буфера (количество записей).
-     * @param writerBatchSize Размер внутреннего батча RecordWriter'а.
+     * @brief Constructor.
+     * @note RecBuffer is NOT created here. It is lazily instantiated on first use.
+     * @param bufferCapacity Number of records the circular buffer can hold.
+     * @param writerBatchSize Batch size for the internal RecordWriter.
      */
-    RecordProducer(size_t bufferCapacity = 10000,
-                   size_t writerBatchSize = 100);
-
+    RecordProducer(size_t bufferCapacity = 10000, size_t writerBatchSize = 100);
     virtual ~RecordProducer();
 
     /**
-     * @brief Запускает рабочий поток генерации.
-     * Автоматически вызывает initialize(), если это не было сделано ранее.
+     * @brief Starts the background production thread.
+     * Automatically triggers initialization if not already done.
      */
     void start();
 
     /**
-     * @brief Останавливает генерацию и сбрасывает остатки данных в буфер.
+     * @brief Stops the production thread and flushes remaining data.
      */
     void stop();
 
     /**
-     * @brief Ожидает завершения потока.
+     * @brief Blocks until the background thread finishes execution.
      */
     void join();
 
-    bool isRunning() const;
+    [[nodiscard]] bool isRunning() const;
 
     /**
-     * @brief Возвращает указатель на буфер.
-     * Если буфер еще не создан, вызывает initialize().
+     * @brief Provides access to the underlying RecBuffer.
+     * Triggers lazy initialization if called for the first time.
+     * @return Shared pointer to the buffer.
      */
     std::shared_ptr<RecBuffer> getBuffer();
 
+    /**
+     * @brief Provides access to the data writer.
+     * Triggers lazy initialization if called for the first time.
+     * @return Reference to the internal RecordWriter.
+     */
+    RecordWriter& getWriter();
+
 protected:
     /**
-     * @brief Чисто виртуальная функция, определяющая схему данных.
-     * Наследник ДОЛЖЕН реализовать этот метод. Он будет вызван один раз при инициализации.
+     * @brief Defines the schema for the generated records.
+     * Must be implemented by the derived class.
+     * @return RecRule describing the record layout.
      */
     virtual RecRule defineRule() = 0;
 
     /**
-     * @brief Вызывается в потоке перед началом цикла.
-     */
-    virtual void onProduceStart() {}
-
-    /**
-     * @brief Заполняет одну запись данными.
-     * @param rec Ссылка на запись, память которой нужно заполнить.
-     * @return true, если запись успешно заполнена и готова к фиксации.
-     * @return false, если данных больше нет (EOF) или произошла ошибка.
+     * @brief Generates a single record.
+     * Must be implemented by the derived class.
+     * @param rec Pre-allocated record to be filled with data.
+     * @return True to continue production, false to stop the thread.
      */
     virtual bool produceStep(Record& rec) = 0;
 
     /**
-     * @brief Вызывается в потоке после остановки цикла.
+     * @brief Lifecycle hook called just before the main loop starts.
      */
-    virtual void onProduceStop() {}
+    virtual void onProduceStart() {}
 
     /**
-     * @brief Предоставляет доступ к писателю данных.
-     * Гарантирует инициализацию.
+     * @brief Lifecycle hook called immediately after the main loop terminates.
      */
-    RecordWriter& getWriter();
+    virtual void onProduceStop() {}
 
     virtual void workerLoop();
 
 private:
     /**
-     * @brief Создает RecBuffer и RecordWriter, вызывая defineRule().
+     * @brief Thread-safe lazy initialization of the buffer and writer.
      */
     void initialize();
 
 protected:
-    // Config
     size_t m_bufferCapacity;
     size_t m_writerBatchSize;
 
-    // State
     std::shared_ptr<RecBuffer> m_buffer;
     std::unique_ptr<RecordWriter> m_writer;
 
-    std::atomic_bool m_running;
+    std::atomic<bool> m_running;
     std::thread m_worker;
 
-    std::mutex m_initMtx; // Защита для lazy initialization
-    bool m_isInitialized;
+    std::mutex m_initMtx;
+    std::atomic<bool> m_isInitialized;
 };
 
+/**
+ * @class BatchRecordProducer
+ * @brief Optimized producer class for generating data in large contiguous blocks.
+ */
 class CYCLIB_EXPORT BatchRecordProducer : public RecordProducer {
 public:
-    using RecordProducer::RecordProducer; // Наследуем конструктор
+    using RecordProducer::RecordProducer;
 
 protected:
     /**
-     * @brief Заглушка для поштучного метода.
-     * Не должен вызываться в пакетном режиме.
+     * @brief Blocked single-record production method.
+     * Marked as final to prevent misuse in batch mode.
      */
     bool produceStep(Record& rec) override final { return false; }
 
     /**
-     * @brief Метод для генерации пакета данных.
-     * @param batch Структура, содержащая указатель на память и доступную емкость.
-     * @return Количество фактически записанных записей.
-     * Если вернуть 0, генерация остановится.
+     * @brief Generates a batch of records.
+     * Must be implemented by the derived class.
+     * @param batch Memory block to be filled with records.
+     * @return The actual number of records written to the batch.
+     * Returning 0 will yield the thread temporarily.
      */
     virtual size_t produceBatch(const RecordWriter::RecordBatch& batch) = 0;
 
-    /**
-     * @brief Переопределенный цикл для пакетной работы.
-     */
     void workerLoop() override;
 };
 

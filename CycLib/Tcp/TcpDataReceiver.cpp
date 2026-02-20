@@ -1,11 +1,11 @@
-// TcpDataReceiver.cpp
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #include "TcpDataReceiver.h"
 #include "MessageUtils.h"
 #include <iostream>
-#include <thread> // Для sleep_for
-#include <chrono> // Для milliseconds
+#include <thread>
+#include <chrono>
 
 namespace cyc {
 
@@ -25,64 +25,60 @@ bool TcpDataReceiver::connect(const std::string& host, uint16_t port, const std:
     if (isRunning() || m_connected) return false;
 
     asio::error_code ec;
-
-    // 1. Resolve
     asio::ip::tcp::resolver resolver(m_ioContext);
     auto endpoints = resolver.resolve(host, std::to_string(port), ec);
+
     if (ec) {
-        std::cerr << "TcpDataReceiver: Resolve failed: " << ec.message() << std::endl;
+        std::cerr << "TcpDataReceiver: Resolve failed: " << ec.message() << "\n";
         return false;
     }
 
-    // 2. Connect
     asio::connect(m_socket, endpoints, ec);
     if (ec) {
-        std::cerr << "TcpDataReceiver: Connect failed: " << ec.message() << std::endl;
+        std::cerr << "TcpDataReceiver: Connect failed: " << ec.message() << "\n";
         return false;
     }
 
-    // 3. Handshake Request
+    // Handshake
     if (!MessageUtils::sendMessage(m_socket, MessageType::RequestDataStream, bufferName, ec)) {
-        std::cerr << "TcpDataReceiver: Handshake send failed: " << ec.message() << std::endl;
+        std::cerr << "TcpDataReceiver: Handshake send failed: " << ec.message() << "\n";
         m_socket.close(ec);
         return false;
     }
 
-    // 4. Handshake Response
     TcpHeader header;
     std::vector<uint8_t> payload;
 
     if (!MessageUtils::receiveMessage(m_socket, header, payload, ec)) {
-        std::cerr << "TcpDataReceiver: Handshake recv failed: " << ec.message() << std::endl;
+        std::cerr << "TcpDataReceiver: Handshake recv failed: " << ec.message() << "\n";
         m_socket.close(ec);
         return false;
     }
 
     if (header.type == MessageType::ResponseError) {
         std::string err(payload.begin(), payload.end());
-        std::cerr << "TcpDataReceiver: Server rejected: " << err << std::endl;
+        std::cerr << "TcpDataReceiver: Server rejected: " << err << "\n";
         m_socket.close(ec);
         return false;
     }
 
     if (header.type != MessageType::ResponseRecRule) {
-        std::cerr << "TcpDataReceiver: Unexpected header type: " << (int)header.type << std::endl;
+        std::cerr << "TcpDataReceiver: Unexpected header type\n";
         m_socket.close(ec);
         return false;
     }
 
-    // 5. Parse Rule
     try {
         std::string ruleText(payload.begin(), payload.end());
         m_negotiatedRule = RecRule::fromText(ruleText);
     } catch (const std::exception& e) {
-        std::cerr << "TcpDataReceiver: Invalid rule: " << e.what() << std::endl;
+        std::cerr << "TcpDataReceiver: Invalid rule: " << e.what() << "\n";
         m_socket.close(ec);
         return false;
     }
 
     m_connected = true;
-    start(); // Запуск RecordProducer
+    start();
 
     return true;
 }
@@ -92,18 +88,17 @@ RecRule TcpDataReceiver::defineRule() {
 }
 
 void TcpDataReceiver::stop() {
+    m_connected = false;
     asio::error_code ec;
 
-    // Сначала останавливаем логический цикл
-    RecordProducer::stop();
-
-    // Затем закрываем сокет, чтобы прервать блокирующие вызовы (read/write)
-    // Это вызовет ошибку operation_aborted или WSACancelBlockingCall в потоке, это нормально.
+    // CRITICAL FIX: Close socket first to unblock asio::read in worker loop
     if (m_socket.is_open()) {
         m_socket.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
         m_socket.close(ec);
     }
-    m_connected = false;
+
+    // Now safe to join the thread
+    RecordProducer::stop();
 }
 
 bool TcpDataReceiver::isConnected() const {
@@ -117,9 +112,9 @@ void TcpDataReceiver::workerLoop() {
     asio::error_code ec;
 
     while (isRunning() && m_socket.is_open()) {
-        auto batch = m_writer->nextBatch();
+        auto batch = m_writer->nextBatch(m_writerBatchSize);
 
-        // Если локальный буфер полон, ждем и пробуем снова
+        // Wait if target ring buffer is currently full
         if (!batch.isValid()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
@@ -127,65 +122,47 @@ void TcpDataReceiver::workerLoop() {
 
         uint32_t maxBytesToReceive = static_cast<uint32_t>(batch.capacity * recordSize);
 
-        // --- 1. Отправка запроса ---
+        // 1. Request Data
         TcpHeader reqHeader;
         reqHeader.type = MessageType::RequestDataBatch;
         reqHeader.payloadSize = maxBytesToReceive;
 
         asio::write(m_socket, asio::buffer(&reqHeader, sizeof(TcpHeader)), ec);
-        if (ec) {
-            if (isRunning()) std::cerr << "TcpDataReceiver: Write request failed: " << ec.message() << std::endl;
-            break;
-        }
+        if (ec) break;
 
-        // --- 2. Чтение заголовка ответа ---
+        // 2. Read Response Header
         TcpHeader respHeader;
         asio::read(m_socket, asio::buffer(&respHeader, sizeof(TcpHeader)), ec);
 
-        if (ec) {
-            // Если мы останавливаемся, ошибки отмены операций нормальны
-            if (isRunning() && ec != asio::error::eof) {
-                std::cerr << "TcpDataReceiver: Read response failed: " << ec.message() << std::endl;
-            }
-            break;
-        }
+        if (ec) break;
 
-        // Проверка сигнатуры и типа
-        if (respHeader.signature != 0x43594300) {
-            std::cerr << "TcpDataReceiver: Invalid signature received." << std::endl;
-            break;
-        }
-
-        if (respHeader.type != MessageType::ResponseDataBatch) {
-            std::cerr << "TcpDataReceiver: Unexpected response type: " << (int)respHeader.type << std::endl;
+        if (respHeader.signature != 0x43594300 || respHeader.type != MessageType::ResponseDataBatch) {
+            std::cerr << "TcpDataReceiver: Invalid signature or type\n";
             break;
         }
 
         uint32_t incomingBytes = respHeader.payloadSize;
 
-        // --- 3. Обработка пустого ответа (Keep-Alive) ---
+        // 3. Handle Keep-Alive (Empty response)
         if (incomingBytes == 0) {
-            // ВАЖНО: Если данных нет, делаем паузу, чтобы не спамить сервер запросами
-            // и не создавать busy loop, который сложно прервать.
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
         if (incomingBytes > maxBytesToReceive) {
-            std::cerr << "TcpDataReceiver: Server sent too much data!" << std::endl;
+            std::cerr << "TcpDataReceiver: Server sent too much data!\n";
             break;
         }
 
-        // --- 4. Чтение данных (Zero-Copy) ---
+        // 4. Zero-Copy Read Payload
         asio::read(m_socket, asio::buffer(batch.data, incomingBytes), ec);
-        if (ec) {
-            if (isRunning()) std::cerr << "TcpDataReceiver: Read payload failed: " << ec.message() << std::endl;
-            break;
-        }
+        if (ec) break;
 
-        // Фиксация полученных данных
         size_t recordsReceived = incomingBytes / recordSize;
         m_writer->commitBatch(recordsReceived);
+
+        // Push immediately to minimize latency
+        m_writer->flush();
     }
 
     onProduceStop();

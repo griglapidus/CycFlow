@@ -4,7 +4,6 @@
 #include "RecordWriter.h"
 #include "Core/PReg.h"
 #include <algorithm>
-#include <cstring>
 
 namespace cyc {
 
@@ -20,6 +19,7 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     , m_running(true)
     , m_hasWork(false)
 {
+    // Allocate memory for the double buffers
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
     m_activeBuf = &m_bufferA;
@@ -27,6 +27,7 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 
     m_timestampId = PReg::getID("TimeStamp");
 
+    // Start the background flushing thread
     m_worker = std::thread(&RecordWriter::workerLoop, this);
 }
 
@@ -34,14 +35,21 @@ RecordWriter::~RecordWriter() {
     stop();
 }
 
+void RecordWriter::stop() {
+    flush(); // Ensure all remaining data is saved before stopping
+    m_running.store(false, std::memory_order_release);
+    m_cv.notify_all();
+
+    if (m_worker.joinable()) {
+        m_worker.join();
+    }
+}
+
 // --- Single Record API ---
 
 Record RecordWriter::nextRecord() {
-    // Если буфер полон или почти полон (early threshold)
     if (m_currentIdx >= m_capacity) {
-        swapBuffers(true); // Блокирующий свап, если места совсем нет
-    } else if (m_currentIdx >= m_earlyThreshold) {
-        swapBuffers(false); // Попытка неблокирующего свапа
+        swapBuffers(true); // Block until background buffer is flushed
     }
 
     uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
@@ -49,118 +57,98 @@ Record RecordWriter::nextRecord() {
 }
 
 void RecordWriter::commitRecord() {
-    uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
-    Record rec(m_rule, ptr);
-
-    if (rec.getDouble(m_timestampId) == 0.0) {
-        rec.setDouble(m_timestampId, get_current_epoch_time());
+    if (m_currentIdx < m_capacity) {
+        ++m_currentIdx;
     }
-
-    m_currentIdx++;
 }
 
-RecordWriter::RecordBatch RecordWriter::nextBatch() {
+// --- Batch API ---
+
+RecordWriter::RecordBatch RecordWriter::nextBatch(size_t maxRecords, bool wait) {
     if (m_currentIdx >= m_capacity) {
-        swapBuffers(true);
-    } else if (m_currentIdx >= m_earlyThreshold) {
-        swapBuffers(false);
-    }
-
-    uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
-    size_t availableCount = m_capacity - m_currentIdx;
-
-    return {ptr, availableCount, m_rule, m_recSize};
-}
-
-void RecordWriter::commitBatch(size_t count) {
-    if (count == 0) return;
-
-    size_t available = m_capacity - m_currentIdx;
-    if (count > available) count = available;
-
-    for (size_t i = 0; i < count; ++i) {
-        uint8_t* ptr = m_activeBuf->data() + ((m_currentIdx + i) * m_recSize);
-        Record rec(m_rule, ptr);
-        if (rec.getDouble(m_timestampId) == 0.0) {
-            rec.setDouble(m_timestampId, get_current_epoch_time());
+        if (!swapBuffers(wait)) {
+            return {nullptr, 0, m_rule, m_recSize}; // Failed to swap (e.g., worker busy and wait=false)
         }
     }
 
-    // Сдвигаем курсор после обработки
-    m_currentIdx += count;
+    size_t available = m_capacity - m_currentIdx;
+    size_t count = std::min(maxRecords, available);
+
+    uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
+    return {ptr, count, m_rule, m_recSize};
 }
 
-// --- Common Logic ---
+void RecordWriter::commitBatch(size_t count) {
+    if (m_currentIdx + count <= m_capacity) {
+        m_currentIdx += count;
+    } else {
+        // Safety fallback in case of incorrect count provided by the user
+        m_currentIdx = m_capacity;
+    }
+}
+
+// --- Control API ---
+
+bool RecordWriter::swapBuffers(bool blocking) {
+    std::unique_lock<std::mutex> lock(m_mtx);
+
+    if (blocking) {
+        m_cv_done.wait(lock, [this]() { return !m_hasWork || !m_running.load(std::memory_order_acquire); });
+    } else if (m_hasWork) {
+        // Background thread is still busy processing the previous buffer
+        return false;
+    }
+
+    if (!m_running.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    // Perform the pointer swap
+    std::swap(m_activeBuf, m_bgBuf);
+    m_bgCount = m_currentIdx;
+
+    // Reset active index.
+    // ZERO-MEMSET OPTIMIZATION: We do not clear the buffer memory here.
+    // We only rely on m_currentIdx to track valid records.
+    m_currentIdx = 0;
+
+    m_hasWork = true;
+    lock.unlock();
+
+    // Wake up the background worker
+    m_cv.notify_one();
+
+    return true;
+}
 
 void RecordWriter::flush() {
     if (m_currentIdx > 0) {
         swapBuffers(true);
     }
+
+    // Wait until the background worker finishes flushing the newly swapped buffer
+    std::unique_lock<std::mutex> lock(m_mtx);
+    m_cv_done.wait(lock, [this] {
+        return !m_hasWork || !m_running;
+    });
 }
 
-void RecordWriter::stop() {
-    // Сначала флашим остатки
-    flush();
-
-    {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        m_running = false;
-        m_hasWork = true; // Будим worker, чтобы он увидел !m_running
-    }
-    m_cv.notify_one();
-
-    if (m_worker.joinable()) {
-        m_worker.join();
-    }
-}
-
-bool RecordWriter::swapBuffers(bool blocking) {
-    std::unique_lock<std::mutex> lock(m_mtx, std::defer_lock);
-
-    if (blocking) {
-        lock.lock();
-        // Ждем, пока worker освободит bgBuf
-        while (m_hasWork && m_running) {
-            m_cv_done.wait(lock);
-        }
-    } else {
-        if (!lock.try_lock()) return false;
-        if (m_hasWork) return false;
-    }
-
-    // В этот момент bgBuf свободен (worker его сбросил или еще не брал)
-
-    // Передаем размер текущего (заполненного) буфера в bgCount
-    m_bgCount = m_currentIdx;
-
-    // Меняем указатели
-    std::swap(m_activeBuf, m_bgBuf);
-
-    // Сбрасываем текущий (теперь это бывший bgBuf, который стал active)
-    // std::memset не обязателен, если мы всегда пишем поверх,
-    // но полезен для дебага и безопасности (чтобы не читать мусор).
-    // Для высокой производительности memset можно убрать.
-    std::memset(m_activeBuf->data(), 0, m_activeBuf->size());
-
-    m_currentIdx = 0;
-    m_hasWork = true; // Сигнализируем worker'у
-
-    lock.unlock();
-    m_cv.notify_one();
-    return true;
-}
+// --- Worker Thread ---
 
 void RecordWriter::workerLoop() {
-    while (true) {
-        size_t countToFlush = 0;
+    while (m_running.load(std::memory_order_acquire)) {
         std::vector<uint8_t>* bufToFlush = nullptr;
+        size_t countToFlush = 0;
 
         {
             std::unique_lock<std::mutex> lock(m_mtx);
-            m_cv.wait(lock, [this] { return m_hasWork; });
 
-            // Если остановили и данных нет -> выход
-            if (!m_running && m_bgCount == 0) return;
+            // Wait until there is work to do or we are requested to stop
+            m_cv.wait(lock, [this]() { return m_hasWork || !m_running.load(std::memory_order_acquire); });
+
+            if (!m_running.load(std::memory_order_acquire) && !m_hasWork) {
+                break;
+            }
 
             bufToFlush = m_bgBuf;
             countToFlush = m_bgCount;
@@ -168,10 +156,11 @@ void RecordWriter::workerLoop() {
 
         if (countToFlush > 0) {
             if (!m_blockOnFull) {
-                // Неблокирующая запись (если буфер переполнен, старые данные могут перезаписаться в RecBuffer)
+                // Non-blocking write: push directly to RecBuffer.
+                // Oldest unread data will be overwritten if the buffer is full.
                 m_target->push(bufToFlush->data(), countToFlush);
             } else {
-                // Блокирующая запись (ждем место в RecBuffer)
+                // Blocking write: wait for readers to free up space
                 size_t writtenSoFar = 0;
                 const uint8_t* dataPtr = bufToFlush->data();
 
@@ -179,11 +168,13 @@ void RecordWriter::workerLoop() {
                     size_t available = m_target->getAvailableWriteSpace();
 
                     if (available == 0) {
-                        // Ждем место
                         m_target->waitForSpace([this]() {
-                            return !m_running;
+                            return !m_running.load(std::memory_order_acquire);
                         });
-                        if (!m_running) break;
+
+                        if (!m_running.load(std::memory_order_acquire)) {
+                            break;
+                        }
                         continue;
                     }
 
@@ -196,13 +187,15 @@ void RecordWriter::workerLoop() {
             }
         }
 
+        // Cleanup after flush is completed
         {
             std::lock_guard<std::mutex> lock(m_mtx);
             m_hasWork = false;
             m_bgCount = 0;
         }
-        // Уведомляем user thread, что swapBuffers может продолжать
-        m_cv_done.notify_one();
+
+        // Notify flush() or swapBuffers(true) that the background buffer is free
+        m_cv_done.notify_all();
     }
 }
 

@@ -10,21 +10,25 @@ namespace cyc {
 PAttr::PAttr() :
     id(0),
     type(DataType::dtUndefine),
-    count(1)
+    count(1),
+    offset(0)
 {
-    memset(name, 0, 26);
+    std::memset(name, 0, sizeof(name));
 }
 
 PAttr::PAttr(const char* _name, DataType _type, size_t _count) :
     id(0),
     type(_type),
-    count(_count)
+    count(_count),
+    offset(0)
 {
-    strncpy(name, _name, 25);
-    name[25] = '\0';
-    id = PReg::getID(name);
+    std::strncpy(name, _name, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    id = PReg::getID(name); // Automatically register and get ID
 }
 
-size_t PAttr::getSize() const { return getTypeSize(type) * count; }
+size_t PAttr::getSize() const {
+    return getTypeSize(type) * count;
+}
 
 } // namespace cyc

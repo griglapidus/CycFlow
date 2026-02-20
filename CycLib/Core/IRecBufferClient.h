@@ -1,32 +1,43 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
-#ifndef IRECBUFFERCLIENT_H
-#define IRECBUFFERCLIENT_H
+#ifndef CYC_IRECBUFFERCLIENT_H
+#define CYC_IRECBUFFERCLIENT_H
 
 #include <cstdint>
 
 namespace cyc {
 
+/**
+ * @class IRecBufferClient
+ * @brief Interface for clients consuming data from a RecBuffer.
+ *
+ * Defines the contract between the circular buffer and its consumers (e.g., RecordReader).
+ */
 class IRecBufferClient {
 public:
     virtual ~IRecBufferClient() = default;
 
     /**
-     * @brief Вызывается RecBuffer'ом, когда в него записали новые данные.
-     * Внимание: вызывается из потока Writer'а!
+     * @brief Called by the RecBuffer when new data has been written.
+     * * @warning This method is invoked directly from the Writer's thread.
+     * Implementations should be thread-safe and execute as quickly as possible
+     * to avoid blocking the data producer.
      */
     virtual void notifyDataAvailable() = 0;
 
     /**
-     * @brief Возвращает позицию курсора чтения клиента.
-     * Используется буфером для расчета безопасной зоны записи.
-     * Если клиент пассивный (как график) и не должен блокировать запись,
-     * он должен возвращать UINT64_MAX.
+     * @brief Returns the current read cursor position of the client.
+     * * This value is used by the buffer to calculate the safe write zone,
+     * ensuring that unread data is not overwritten if the writer operates
+     * in a blocking mode.
+     * * @return The absolute index of the client's read cursor. If the client is
+     * passive (e.g., a real-time UI graph) and should not block the writer,
+     * it must return UINT64_MAX.
      */
-    virtual uint64_t getCursor() const = 0;
+    [[nodiscard]] virtual uint64_t getCursor() const = 0;
 };
 
-}
+} // namespace cyc
 
-#endif // IRECBUFFERCLIENT_H
+#endif // CYC_IRECBUFFERCLIENT_H

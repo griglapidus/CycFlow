@@ -9,7 +9,6 @@
 #include "Core/Record.h"
 #include "CbfDefs.h"
 
-#include <string>
 #include <fstream>
 
 namespace cyc {
@@ -19,6 +18,13 @@ enum class CbfMode {
     Write
 };
 
+/**
+ * @class CbfFile
+ * @brief Low-level wrapper for handling Cyc Binary Format (.cbf) files.
+ *
+ * Provides safe boundary checks, section header management, and raw byte stream
+ * operations for writing and reading RecRules and raw records.
+ */
 class CYCLIB_EXPORT CbfFile {
 public:
     CbfFile();
@@ -27,75 +33,83 @@ public:
     bool open(const std::string& filename, CbfMode mode);
     void close();
 
-    bool isOpen() const;
-    bool isGood() const;
+    [[nodiscard]] bool isOpen() const;
+    [[nodiscard]] bool isGood() const;
 
-    // --- API для записи (Write) ---
+    // --- Write API ---
+
     /**
-     * @brief Устанавливает псевдоним (alias) буфера.
-     * Это имя будет записываться в поле header.name каждого заголовка секции.
-     * @note Максимальная длина — 10 символов (обрезается, если длиннее).
+     * @brief Sets an alias that will be written into the header.name of each section.
+     * @param alias The alias name (max 10 characters).
      */
     void setAlias(const std::string& alias);
 
     /**
-     * @brief Записывает секцию заголовка со схемой данных.
+     * @brief Writes a Header section containing the given RecRule.
      */
     bool writeHeader(const RecRule& rule);
 
     /**
-     * @brief Начинает секцию данных.
-     * Записывает заголовок секции с нулевой длиной (обновляется в endDataSection).
+     * @brief Starts a Data section. The length is initially 0 and updated in endDataSection().
      */
     bool beginDataSection();
 
     /**
-     * @brief Записывает одну запись.
-     * @note Требует наличия методов getSize() и data() у Record.
+     * @brief Writes a single record to the data section.
+     * @param rec The record to write.
+     * @return True if successful.
      */
     bool writeRecord(const Record& rec);
 
     /**
-     * @brief Записывает сырые байты (альтернатива writeRecord).
+     * @brief Writes raw bytes directly to the file.
+     * @param data Pointer to the memory block.
+     * @param size Size in bytes.
      */
     bool writeBytes(const void* data, size_t size);
 
     /**
-     * @brief Завершает секцию данных, обновляя поле длины в заголовке файла.
+     * @brief Finalizes the current Data section by updating its length field.
      */
     bool endDataSection();
 
-    // --- API для чтения (Read) ---
+    // --- Read API ---
 
     /**
-     * @brief Читает заголовок следующей секции.
+     * @brief Reads the next section header from the stream.
      */
     bool readSectionHeader(CbfSectionHeader& header);
 
     /**
-     * @brief Читает тело секции Header и парсит RecRule.
+     * @brief Reads a Header section body and reconstructs a RecRule.
      */
     bool readRule(const CbfSectionHeader& header, RecRule& outRule);
 
     /**
-     * @brief Читает одну запись.
-     * Record должен быть инициализирован и указывать на выделенную память.
+     * @brief Reads a single record from the data section.
+     * @param rec The record object with pre-allocated memory to read into.
+     * @return True if successful.
      */
     bool readRecord(Record& rec);
 
     /**
-     * @brief Пропускает тело текущей секции.
+     * @brief Skips the body of the given section to move to the next header.
      */
     bool skipSection(const CbfSectionHeader& header);
 
+    /**
+     * @brief Exposes the underlying filestream for zero-copy block reads.
+     */
+    std::fstream& getStream() { return m_file; }
+
 private:
-    std::string m_filename;
     std::fstream m_file;
+    std::string m_filename;
     CbfMode m_mode;
     std::string m_alias;
 
-    std::streampos m_currentSectionStart; // Позиция начала текущей секции (для перезаписи длины)
-    int64_t m_writtenBytesInSection;      // Счетчик байт в текущей секции
+    std::streampos m_currentSectionStart;
+    size_t m_writtenBytesInSection;
 };
 
 } // namespace cyc

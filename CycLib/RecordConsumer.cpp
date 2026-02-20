@@ -16,8 +16,9 @@ RecordConsumer::~RecordConsumer() {
 }
 
 void RecordConsumer::start() {
-    if (m_running.load()) return;
-    m_running.store(true);
+    if (m_running.load(std::memory_order_acquire)) return;
+
+    m_running.store(true, std::memory_order_release);
     m_worker = std::thread(&RecordConsumer::workerLoop, this);
 }
 
@@ -28,6 +29,7 @@ void RecordConsumer::stop() {
     if (m_reader) {
         m_reader->stop();
     }
+
     if (m_worker.joinable()) {
         if (std::this_thread::get_id() != m_worker.get_id()) {
             m_worker.join();
@@ -38,7 +40,7 @@ void RecordConsumer::stop() {
 }
 
 void RecordConsumer::finish() {
-    if (!m_running.load()) {
+    if (!m_running.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -53,11 +55,11 @@ void RecordConsumer::finish() {
             m_worker.detach();
         }
     }
-    m_running.store(false);
+    m_running.store(false, std::memory_order_release);
 }
 
 bool RecordConsumer::isRunning() const {
-    return m_running.load();
+    return m_running.load(std::memory_order_acquire);
 }
 
 const RecordReader& RecordConsumer::getReader() const {
@@ -67,30 +69,37 @@ const RecordReader& RecordConsumer::getReader() const {
 void RecordConsumer::workerLoop() {
     onConsumeStart();
 
-    while (m_running.load()) {
+    while (m_running.load(std::memory_order_relaxed)) {
         Record rec = m_reader->nextRecord();
 
         if (!rec.isValid()) {
-            break;
+            break; // Reader was stopped or finished
         }
 
         consumeRecord(rec);
     }
 
+    m_running.store(false, std::memory_order_release);
     onConsumeStop();
 }
+
+// --- BatchRecordConsumer Implementation ---
 
 void BatchRecordConsumer::workerLoop() {
     onConsumeStart();
 
-    while (m_running.load()) {
-        auto batch = m_reader->nextBatch();
+    while (m_running.load(std::memory_order_relaxed)) {
+        // Fetch up to the entire internal capacity defined in RecordReader
+        auto batch = m_reader->nextBatch(SIZE_MAX, true);
+
         if (!batch.isValid()) {
-            break;
+            break; // Reader was stopped or finished
         }
+
         consumeBatch(batch);
     }
 
+    m_running.store(false, std::memory_order_release);
     onConsumeStop();
 }
 

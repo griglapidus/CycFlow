@@ -1,40 +1,34 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
-#ifndef CIRCULARBUFFER_H
-#define CIRCULARBUFFER_H
+#ifndef CYC_CIRCULARBUFFER_H
+#define CYC_CIRCULARBUFFER_H
 
 #include <vector>
-#include <memory>
 #include <iterator>
 #include <algorithm>
 #include <cassert>
 #include <type_traits>
 #include <shared_mutex>
 #include <mutex>
+#include <atomic>
 
 namespace cyc {
 
 /**
- * @brief Thread-safe circular buffer container.
+ * @class CircularBuffer
+ * @brief Thread-safe circular buffer container with STL-like API.
  *
- * This class implements a ring buffer using a dynamic array. It uses `std::shared_mutex`
- * to implement a "Multiple Readers, Single Writer" thread-safety model.
+ * Implements a ring buffer using a dynamic array. It uses `std::shared_mutex`
+ * for safe read/write operations and `std::atomic` for lock-free state querying.
+ *
+ * @warning **Thread-Safety Notice:** Iterators and references returned by accessors
+ * (e.g., `operator[]`, `front()`) are NOT thread-safe if the buffer is being modified
+ * concurrently by another thread. Use bulk operations (`push_many`, `peek_many`)
+ * for strictly safe concurrent access.
  *
  * @tparam T Type of elements stored.
  * @tparam Allocator Allocator to use for memory management.
- *
- * @warning **Thread-Safety Notice:**
- * While bulk operations (`push_many`, `peek_many`) and size checks are thread-safe,
- * the **iterators and reference accessors** (e.g., `begin()`, `end()`, `operator[]`, `front()`)
- * are **NOT thread-safe** if the buffer is being modified concurrently.
- *
- * If one thread resizes or overwrites the buffer, existing iterators or references
- * held by other threads may become invalid or point to inconsistent data.
- *
- * For safe concurrent access, prefer using:
- * - `peek_many()` to read a snapshot of data.
- * - `push_many()` to write data atomically.
  */
 template <typename T, typename Allocator = std::allocator<T>>
 class CircularBuffer {
@@ -52,26 +46,26 @@ public:
     using size_type = typename allocator_traits::size_type;
     using difference_type = typename allocator_traits::difference_type;
 
-    static_assert(std::is_same<T, value_type>::value,
+    static_assert(std::is_same_v<T, value_type>,
                   "Allocator::value_type must match CircularBuffer::value_type");
 
-    // --- Constructors ---
+    // --- Constructors & Destructor ---
 
     /**
-     * @brief Constructs a circular buffer with specific capacity.
+     * @brief Constructs a circular buffer.
      * @param capacity Maximum number of elements.
      * @param allocator Allocator instance.
      */
     explicit CircularBuffer(size_type const capacity = 1,
                             allocator_type const& allocator = allocator_type())
         : m_capacity(capacity)
-        , m_allocator(allocator)
-        , m_array(nullptr)
         , m_head(0)
         , m_size(0)
+        , m_allocator(allocator)
+        , m_array(nullptr)
     {
         assert(capacity > 0 && "Capacity must be greater than 0");
-        m_array = allocator_traits::allocate(m_allocator, m_capacity);
+        m_array = allocator_traits::allocate(m_allocator, m_capacity.load(std::memory_order_relaxed));
     }
 
     /**
@@ -80,22 +74,19 @@ public:
      * @param other Buffer to copy from.
      */
     CircularBuffer(self_type const& other)
-        : m_capacity(other.m_capacity)
-        , m_allocator(allocator_traits::select_on_container_copy_construction(other.m_allocator))
-        , m_array(nullptr)
+        : m_capacity(other.capacity())
         , m_head(0)
         , m_size(0)
+        , m_allocator(allocator_traits::select_on_container_copy_construction(other.m_allocator))
+        , m_array(nullptr)
     {
-        // Lock the other buffer for reading
         std::shared_lock<std::shared_mutex> lock(other.m_mtx);
-
-        m_capacity = other.m_capacity;
-        m_array = allocator_traits::allocate(m_allocator, m_capacity);
+        m_array = allocator_traits::allocate(m_allocator, m_capacity.load(std::memory_order_relaxed));
         try {
             assign_into_unsafe(other.begin_unsafe(), other.end_unsafe());
         } catch (...) {
             clear_unsafe();
-            allocator_traits::deallocate(m_allocator, m_array, m_capacity);
+            allocator_traits::deallocate(m_allocator, m_array, m_capacity.load(std::memory_order_relaxed));
             throw;
         }
     }
@@ -106,65 +97,26 @@ public:
      * @param other Buffer to move from.
      */
     CircularBuffer(self_type&& other) noexcept
-        : m_capacity(0)
+        : m_capacity(other.capacity())
+        , m_head(other.m_head.load(std::memory_order_relaxed))
+        , m_size(other.m_size.load(std::memory_order_relaxed))
         , m_allocator(std::move(other.m_allocator))
-        , m_array(nullptr)
-        , m_head(0)
-        , m_size(0)
+        , m_array(other.m_array)
     {
         std::unique_lock<std::shared_mutex> lock(other.m_mtx);
-
-        m_capacity = other.m_capacity;
-        m_array = other.m_array;
-        m_head = other.m_head;
-        m_size = other.m_size;
-
-        // Leave other in valid empty state
         other.m_array = nullptr;
-        other.m_size = 0;
-        other.m_head = 0;
-        other.m_capacity = 0;
+        other.m_size.store(0, std::memory_order_relaxed);
+        other.m_head.store(0, std::memory_order_relaxed);
+        other.m_capacity.store(0, std::memory_order_relaxed);
     }
 
     /**
-     * @brief Constructs a buffer from an iterator range.
-     * @param from Start iterator.
-     * @param to End iterator.
-     * @param allocator Allocator instance.
-     */
-    template <typename InputIterator,
-             typename = std::enable_if_t<!std::is_integral<InputIterator>::value>>
-    CircularBuffer(InputIterator from, InputIterator to,
-                   allocator_type const& allocator = allocator_type())
-        : m_capacity(0)
-        , m_allocator(allocator)
-        , m_array(nullptr)
-        , m_head(0)
-        , m_size(0)
-    {
-        size_type const dist = static_cast<size_type>(std::distance(from, to));
-        assert(dist > 0 && "Iterator range cannot be empty for initial construction");
-
-        m_capacity = dist;
-        m_array = allocator_traits::allocate(m_allocator, m_capacity);
-
-        try {
-            assign_into_unsafe(from, to);
-        } catch (...) {
-            clear_unsafe();
-            allocator_traits::deallocate(m_allocator, m_array, m_capacity);
-            throw;
-        }
-    }
-
-    /**
-     * @brief Destructor.
-     * Destroys all elements and deallocates memory.
+     * @brief Destructor. Destroys all elements and deallocates memory.
      */
     ~CircularBuffer() {
         clear_unsafe();
         if (m_array) {
-            allocator_traits::deallocate(m_allocator, m_array, m_capacity);
+            allocator_traits::deallocate(m_allocator, m_array, m_capacity.load(std::memory_order_relaxed));
         }
     }
 
@@ -172,35 +124,9 @@ public:
 
     /**
      * @brief Copy assignment operator (Thread-Safe).
-     * Uses copy-and-swap idiom.
      */
     CircularBuffer& operator=(self_type other) {
         other.swap(*this);
-        return *this;
-    }
-
-    /**
-     * @brief Move assignment operator (Thread-Safe).
-     * Locks both buffers exclusively.
-     */
-    CircularBuffer& operator=(self_type&& other) noexcept {
-        if (this != &other) {
-            std::scoped_lock<std::shared_mutex, std::shared_mutex> lock(m_mtx, other.m_mtx);
-
-            clear_unsafe();
-            allocator_traits::deallocate(m_allocator, m_array, m_capacity);
-
-            m_capacity = other.m_capacity;
-            m_allocator = std::move(other.m_allocator);
-            m_array = other.m_array;
-            m_head = other.m_head;
-            m_size = other.m_size;
-
-            other.m_array = nullptr;
-            other.m_size = 0;
-            other.m_head = 0;
-            other.m_capacity = 0;
-        }
         return *this;
     }
 
@@ -211,92 +137,85 @@ public:
      */
     void swap(self_type& other) noexcept {
         if (this == &other) return;
-
-        // Lock both mutexes to avoid deadlock
         std::scoped_lock<std::shared_mutex, std::shared_mutex> lock(m_mtx, other.m_mtx);
 
         using std::swap;
         if (typename allocator_traits::propagate_on_container_swap()) {
             swap(m_allocator, other.m_allocator);
         }
-        swap(m_capacity, other.m_capacity);
+
+        size_type tmp_cap = m_capacity.load(std::memory_order_relaxed);
+        m_capacity.store(other.m_capacity.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        other.m_capacity.store(tmp_cap, std::memory_order_relaxed);
+
+        size_type tmp_head = m_head.load(std::memory_order_relaxed);
+        m_head.store(other.m_head.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        other.m_head.store(tmp_head, std::memory_order_relaxed);
+
+        size_type tmp_size = m_size.load(std::memory_order_relaxed);
+        m_size.store(other.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        other.m_size.store(tmp_size, std::memory_order_relaxed);
+
         swap(m_array, other.m_array);
-        swap(m_head, other.m_head);
-        swap(m_size, other.m_size);
     }
 
-    // --- Bulk Operations (High Performance & Thread-Safe) ---
+    // --- Bulk Operations ---
 
     /**
      * @brief Writes multiple elements at once (Thread-Safe).
-     *
-     * Acquires an exclusive lock. If the input size exceeds capacity,
-     * older elements in the buffer are overwritten.
-     *
+     * If the input size exceeds capacity, older elements in the buffer are overwritten.
      * @param source Pointer to the source data array.
      * @param count Number of elements to write.
      */
     void push_many(const T* source, size_type count) {
-        if (count == 0) return;
-        assert(source != nullptr);
-
+        if (count == 0 || !source) return;
         std::unique_lock<std::shared_mutex> lock(m_mtx);
 
-        if (count > m_capacity) {
-            source += (count - m_capacity);
-            count = m_capacity;
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+        if (count > cap) {
+            source += (count - cap);
+            count = cap;
         }
 
-        auto copy_chunk_logic = [&](const T* src, T* dst, size_type n) {
-            if (n == 0) return;
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::copy_n(src, n, dst);
-            } else {
-                for (size_type i = 0; i < n; ++i) {
-                    allocator_traits::destroy(m_allocator, dst + i);
-                    allocator_traits::construct(m_allocator, dst + i, src[i]);
-                }
-            }
-        };
+        size_type head = m_head.load(std::memory_order_relaxed);
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        size_type current_tail = (head + sz) % cap;
 
-        size_type const current_tail = (m_head + m_size) % m_capacity;
-        size_type const chunk1 = std::min(count, m_capacity - current_tail);
-        size_type const chunk2 = count - chunk1;
+        size_type chunk1 = std::min(count, cap - current_tail);
+        size_type chunk2 = count - chunk1;
 
         copy_chunk_logic(source, m_array + current_tail, chunk1);
         copy_chunk_logic(source + chunk1, m_array, chunk2);
 
-        size_type const new_size = m_size + count;
-        if (new_size > m_capacity) {
-            m_size = m_capacity;
-            size_type const overflow = new_size - m_capacity;
-            m_head = (m_head + overflow) % m_capacity;
+        size_type new_size = sz + count;
+        if (new_size > cap) {
+            m_size.store(cap, std::memory_order_release);
+            m_head.store((head + new_size - cap) % cap, std::memory_order_release);
         } else {
-            m_size = new_size;
+            m_size.store(new_size, std::memory_order_release);
         }
     }
 
     /**
      * @brief Peeks at multiple elements starting from an offset (Thread-Safe).
-     *
-     * Acquires a shared lock (allows concurrent readers).
-     *
      * @param index Relative index (0 is the oldest element).
      * @param dest Pointer to the destination buffer.
      * @param count Number of elements to read.
      */
     void peek_many_at(size_type index, T* dest, size_type count) const {
-        assert(dest != nullptr);
-
+        if (!dest || count == 0) return;
         std::shared_lock<std::shared_mutex> lock(m_mtx);
 
-        assert(index + count <= m_size && "Read range exceeds buffer size");
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+        size_type head = m_head.load(std::memory_order_relaxed);
+        size_type sz = m_size.load(std::memory_order_acquire);
 
-        size_type const start_pos = (m_head + index) % m_capacity;
-        size_type const chunk1 = std::min(count, m_capacity - start_pos);
+        assert(index + count <= sz && "Read range exceeds buffer size");
+
+        size_type start_pos = (head + index) % cap;
+        size_type chunk1 = std::min(count, cap - start_pos);
 
         std::copy_n(m_array + start_pos, chunk1, dest);
-
         if (chunk1 < count) {
             std::copy_n(m_array, count - chunk1, dest + chunk1);
         }
@@ -313,7 +232,6 @@ public:
 
     /**
      * @brief Removes multiple elements from the front of the buffer (Thread-Safe).
-     * Acquires an exclusive lock.
      * @param count Number of elements to pop.
      */
     void pop_many(size_type count) {
@@ -327,21 +245,16 @@ public:
     class iterator_impl {
     public:
         using iterator_category = std::random_access_iterator_tag;
-        using value_type = typename std::remove_const<ElemType>::type;
+        using value_type = std::remove_const_t<ElemType>;
         using difference_type = typename allocator_traits::difference_type;
         using pointer = ElemType*;
         using reference = ElemType&;
-        using buffer_type = typename std::conditional<
-            std::is_const<ElemType>::value,
-            const CircularBuffer<T, Allocator>,
-            CircularBuffer<T, Allocator>
-            >::type;
+        using buffer_type = std::conditional_t<std::is_const_v<ElemType>, const CircularBuffer<T, Allocator>, CircularBuffer<T, Allocator>>;
 
         iterator_impl() : m_buf(nullptr), m_pos(0) {}
         iterator_impl(buffer_type* buf, size_type pos) : m_buf(buf), m_pos(pos) {}
 
-        // Note: Dereferencing iterators is NOT thread-safe if another thread resizes/writes.
-        reference operator*() const { return (*m_buf)[m_pos]; } // Uses operator[] which locks internally
+        reference operator*() const { return (*m_buf)[m_pos]; }
         pointer operator->() const { return &(operator*()); }
 
         iterator_impl& operator++() { ++m_pos; return *this; }
@@ -373,224 +286,231 @@ public:
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    // Warning: Obtaining iterators is safe (locked), but using them concurrently is not.
     iterator begin() { return iterator(this, 0); }
-    iterator end() { std::shared_lock<std::shared_mutex> lock(m_mtx); return iterator(this, m_size); }
+    iterator end() { return iterator(this, size()); }
     const_iterator begin() const { return const_iterator(this, 0); }
-    const_iterator end() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return const_iterator(this, m_size); }
+    const_iterator end() const { return const_iterator(this, size()); }
     const_iterator cbegin() const { return const_iterator(this, 0); }
-    const_iterator cend() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return const_iterator(this, m_size); }
+    const_iterator cend() const { return const_iterator(this, size()); }
 
-    // --- Accessors (Thread-Safe) ---
+    // --- Accessors (Lock-Free where applicable) ---
 
-    [[nodiscard]] bool empty() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return m_size == 0; }
-    [[nodiscard]] bool full() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return m_size == m_capacity; }
-    [[nodiscard]] size_type capacity() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return m_capacity; }
+    [[nodiscard]] bool empty() const { return m_size.load(std::memory_order_acquire) == 0; }
+    [[nodiscard]] bool full() const { return m_size.load(std::memory_order_acquire) == m_capacity.load(std::memory_order_relaxed); }
+    [[nodiscard]] size_type capacity() const { return m_capacity.load(std::memory_order_relaxed); }
     [[nodiscard]] size_type max_size() const { return allocator_traits::max_size(m_allocator); }
-    [[nodiscard]] size_type size() const { std::shared_lock<std::shared_mutex> lock(m_mtx); return m_size; }
+    [[nodiscard]] size_type size() const { return m_size.load(std::memory_order_acquire); }
     [[nodiscard]] allocator_type get_allocator() const { return m_allocator; }
 
     /**
-     * @brief Converts buffer to std::vector.
-     * Snapshot operation (thread-safe).
+     * @brief Converts buffer to std::vector. Snapshot operation (thread-safe).
      */
     [[nodiscard]] std::vector<T> toStdVector() const {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
         std::vector<T> v;
-        v.reserve(m_size);
-        for (size_type i = 0; i < m_size; ++i) v.push_back(at_unchecked(i));
+        size_type sz = m_size.load(std::memory_order_acquire);
+        v.reserve(sz);
+        for (size_type i = 0; i < sz; ++i) v.push_back(at_unchecked(i));
         return v;
     }
 
-    // WARNING: returning references is risky in concurrent code.
-    reference front() { std::shared_lock<std::shared_mutex> lock(m_mtx); assert(m_size > 0); return m_array[m_head]; }
-    const_reference front() const { std::shared_lock<std::shared_mutex> lock(m_mtx); assert(m_size > 0); return m_array[m_head]; }
+    reference front() { std::shared_lock<std::shared_mutex> lock(m_mtx); assert(size() > 0); return m_array[m_head.load(std::memory_order_relaxed)]; }
+    const_reference front() const { std::shared_lock<std::shared_mutex> lock(m_mtx); assert(size() > 0); return m_array[m_head.load(std::memory_order_relaxed)]; }
     reference back() {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(m_size > 0);
-        return m_array[(m_head + m_size - 1) % m_capacity];
+        assert(size() > 0);
+        return m_array[(m_head.load(std::memory_order_relaxed) + size() - 1) % capacity()];
     }
     const_reference back() const {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(m_size > 0);
-        return m_array[(m_head + m_size - 1) % m_capacity];
+        assert(size() > 0);
+        return m_array[(m_head.load(std::memory_order_relaxed) + size() - 1) % capacity()];
     }
 
     reference operator[](size_type const n) {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(n < m_size);
+        assert(n < size());
         return at_unchecked(n);
     }
     const_reference operator[](size_type const n) const {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(n < m_size);
+        assert(n < size());
         return at_unchecked(n);
     }
     reference at(size_type const n) {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(n < m_size);
+        assert(n < size());
         return at_unchecked(n);
     }
     const_reference at(size_type const n) const {
         std::shared_lock<std::shared_mutex> lock(m_mtx);
-        assert(n < m_size);
+        assert(n < size());
         return at_unchecked(n);
     }
 
-    // --- Modifiers (Thread-Safe) ---
+    // --- Modifiers ---
 
-    /**
-     * @brief Clears the buffer.
-     * Acquires exclusive lock.
-     */
     void clear() {
         std::unique_lock<std::shared_mutex> lock(m_mtx);
         clear_unsafe();
     }
 
-    /**
-     * @brief Increases the capacity of the buffer.
-     *
-     * Creates a new buffer, copies existing data (using block copy logic),
-     * and swaps. This is an expensive operation but thread-safe.
-     * @param new_capacity New maximum number of elements.
-     */
     void reserve(size_type const new_capacity) {
         std::unique_lock<std::shared_mutex> lock(m_mtx);
-
-        if (new_capacity <= m_capacity) return;
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+        if (new_capacity <= cap) return;
 
         CircularBuffer tmp(new_capacity, m_allocator);
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        size_type head = m_head.load(std::memory_order_relaxed);
 
-        size_type const chunk1 = std::min(m_size, m_capacity - m_head);
-        size_type const chunk2 = m_size - chunk1;
+        size_type chunk1 = std::min(sz, cap - head);
+        size_type chunk2 = sz - chunk1;
 
-        tmp.push_many(m_array + m_head, chunk1);
-
+        tmp.push_many(m_array + head, chunk1);
         if (chunk2 > 0) {
             tmp.push_many(m_array, chunk2);
         }
 
         using std::swap;
-        swap(m_capacity, tmp.m_capacity);
+        m_capacity.store(tmp.m_capacity.load(std::memory_order_relaxed), std::memory_order_relaxed);
         swap(m_array, tmp.m_array);
-        swap(m_head, tmp.m_head);
-        swap(m_size, tmp.m_size);
+        m_head.store(tmp.m_head.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        m_size.store(tmp.m_size.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
-    /**
-     * @brief Constructs an element in-place at the end.
-     * If full, overwrites the oldest element.
-     */
     template <typename... Args>
     void emplace_back(Args&&... args) {
         std::unique_lock<std::shared_mutex> lock(m_mtx);
-        size_type const write_idx = (m_head + m_size) % m_capacity;
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+        size_type head = m_head.load(std::memory_order_relaxed);
+        size_type sz = m_size.load(std::memory_order_relaxed);
 
-        if (m_size == m_capacity) {
-            // Full: overwrite
+        size_type write_idx = (head + sz) % cap;
+
+        if (sz == cap) {
             allocator_traits::destroy(m_allocator, m_array + write_idx);
             allocator_traits::construct(m_allocator, m_array + write_idx, std::forward<Args>(args)...);
-            m_head = (m_head + 1) % m_capacity;
+            m_head.store((head + 1) % cap, std::memory_order_release);
         } else {
-            // Not full
             allocator_traits::construct(m_allocator, m_array + write_idx, std::forward<Args>(args)...);
-            ++m_size;
+            m_size.store(sz + 1, std::memory_order_release);
         }
     }
 
     void push_back(value_type const& item) { emplace_back(item); }
     void push_back(value_type&& item) { emplace_back(std::move(item)); }
 
-    /**
-     * @brief Removes the first element.
-     */
     void pop_front() {
         std::unique_lock<std::shared_mutex> lock(m_mtx);
-        assert(m_size > 0);
-        allocator_traits::destroy(m_allocator, m_array + m_head);
-        m_head = (m_head + 1) % m_capacity;
-        --m_size;
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        assert(sz > 0);
+        size_type head = m_head.load(std::memory_order_relaxed);
+
+        allocator_traits::destroy(m_allocator, m_array + head);
+        m_head.store((head + 1) % m_capacity.load(std::memory_order_relaxed), std::memory_order_release);
+        m_size.store(sz - 1, std::memory_order_release);
     }
 
-    /**
-     * @brief Removes the last element.
-     */
     void pop_back() {
         std::unique_lock<std::shared_mutex> lock(m_mtx);
-        assert(m_size > 0);
-        size_type const tail = (m_head + m_size - 1) % m_capacity;
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        assert(sz > 0);
+        size_type tail = (m_head.load(std::memory_order_relaxed) + sz - 1) % m_capacity.load(std::memory_order_relaxed);
+
         allocator_traits::destroy(m_allocator, m_array + tail);
-        --m_size;
+        m_size.store(sz - 1, std::memory_order_release);
     }
 
     const_pointer get_ptr_unsafe(size_type index) const {
-        return m_array + ((m_head + index) % m_capacity);
+        return m_array + ((m_head.load(std::memory_order_relaxed) + index) % m_capacity.load(std::memory_order_relaxed));
     }
 
     size_type get_head_index_unsafe() const {
-        return m_head;
+        return m_head.load(std::memory_order_relaxed);
     }
 
 private:
-    // Helper to get iterators without locking (for internal use in constructors)
     iterator begin_unsafe() { return iterator(this, 0); }
-    iterator end_unsafe() { return iterator(this, m_size); }
+    iterator end_unsafe() { return iterator(this, m_size.load(std::memory_order_relaxed)); }
 
     reference at_unchecked(size_type const index) const {
-        return m_array[(m_head + index) % m_capacity];
+        return m_array[(m_head.load(std::memory_order_relaxed) + index) % m_capacity.load(std::memory_order_relaxed)];
     }
 
     void clear_unsafe() {
-        if (m_size == 0) return;
-        for (size_type n = 0; n < m_size; ++n) {
-            allocator_traits::destroy(m_allocator, m_array + ((m_head + n) % m_capacity));
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        if (sz == 0) return;
+        size_type head = m_head.load(std::memory_order_relaxed);
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+
+        for (size_type n = 0; n < sz; ++n) {
+            allocator_traits::destroy(m_allocator, m_array + ((head + n) % cap));
         }
-        m_head = 0;
-        m_size = 0;
+        m_head.store(0, std::memory_order_relaxed);
+        m_size.store(0, std::memory_order_release);
     }
 
     void pop_many_unsafe(size_type count) {
-        assert(count <= m_size);
+        size_type sz = m_size.load(std::memory_order_relaxed);
+        assert(count <= sz);
+        size_type head = m_head.load(std::memory_order_relaxed);
+        size_type cap = m_capacity.load(std::memory_order_relaxed);
+
         if constexpr (!std::is_trivially_destructible_v<T>) {
-            size_type current = m_head;
+            size_type current = head;
             for(size_type i = 0; i < count; ++i) {
                 allocator_traits::destroy(m_allocator, m_array + current);
-                current = (current + 1) % m_capacity;
+                current = (current + 1) % cap;
             }
         }
-        m_head = (m_head + count) % m_capacity;
-        m_size -= count;
+        m_head.store((head + count) % cap, std::memory_order_release);
+        m_size.store(sz - count, std::memory_order_release);
     }
 
     template <typename InputIterator>
     void assign_into_unsafe(InputIterator from, InputIterator const to) {
         while (from != to) {
-            size_type const write_idx = (m_head + m_size) % m_capacity;
-            if (m_size == m_capacity) {
+            size_type sz = m_size.load(std::memory_order_relaxed);
+            size_type head = m_head.load(std::memory_order_relaxed);
+            size_type cap = m_capacity.load(std::memory_order_relaxed);
+            size_type write_idx = (head + sz) % cap;
+
+            if (sz == cap) {
                 allocator_traits::destroy(m_allocator, m_array + write_idx);
                 allocator_traits::construct(m_allocator, m_array + write_idx, *from);
-                m_head = (m_head + 1) % m_capacity;
+                m_head.store((head + 1) % cap, std::memory_order_relaxed);
             } else {
                 allocator_traits::construct(m_allocator, m_array + write_idx, *from);
-                ++m_size;
+                m_size.store(sz + 1, std::memory_order_relaxed);
             }
             ++from;
         }
     }
 
-    size_type      m_capacity;
+    void copy_chunk_logic(const T* src, T* dst, size_type n) {
+        if (n == 0) return;
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::copy_n(src, n, dst);
+        } else {
+            for (size_type i = 0; i < n; ++i) {
+                allocator_traits::destroy(m_allocator, dst + i);
+                allocator_traits::construct(m_allocator, dst + i, src[i]);
+            }
+        }
+    }
+
+    // Alignment to prevent false sharing between reader and writer threads
+    alignas(64) std::atomic<size_type> m_capacity;
+    alignas(64) std::atomic<size_type> m_head;
+    alignas(64) std::atomic<size_type> m_size;
+
     allocator_type m_allocator;
     pointer        m_array;
-    size_type      m_head;
-    size_type      m_size;
 
-    mutable std::shared_mutex m_mtx;
+    alignas(64) mutable std::shared_mutex m_mtx;
 };
 
-/**
- * @brief Global swap specialization for CircularBuffer.
- */
 template <typename T, typename A>
 void swap(CircularBuffer<T, A>& lhs, CircularBuffer<T, A>& rhs) noexcept {
     lhs.swap(rhs);
@@ -598,4 +518,4 @@ void swap(CircularBuffer<T, A>& lhs, CircularBuffer<T, A>& rhs) noexcept {
 
 } // namespace cyc
 
-#endif // CIRCULARBUFFER_H
+#endif // CYC_CIRCULARBUFFER_H

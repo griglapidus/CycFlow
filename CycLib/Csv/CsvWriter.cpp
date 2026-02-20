@@ -11,19 +11,12 @@
 namespace cyc {
 
 CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
-                     bool autoStart, size_t readerBatchSize)
-    : RecordConsumer(buffer, readerBatchSize) // Initialize base class
+                     bool autoStart, size_t batchSize)
+    : BatchRecordConsumer(buffer, batchSize)
     , m_filename(filename)
     , m_delimiter(",")
 {
-    // Cache attributes from the reader's rule for performance
     m_cachedAttrs = getReader().getRule().getAttributes();
-
-    setupFile();
-
-    if (m_file.is_open()) {
-        m_file << std::fixed << std::setprecision(6);
-    }
 
     if (autoStart) {
         start();
@@ -31,95 +24,101 @@ CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buf
 }
 
 CsvWriter::~CsvWriter() {
-    // Stop the thread explicitly before closing the file
     stop();
+}
 
+void CsvWriter::onConsumeStart() {
+    setupFile();
+
+    if (m_file.is_open()) {
+        m_file << std::fixed << std::setprecision(6);
+    } else {
+        std::cerr << "CsvWriter: Failed to open file " << m_filename << "\n";
+    }
+}
+
+void CsvWriter::onConsumeStop() {
     if (m_file.is_open()) {
         m_file.flush();
         m_file.close();
     }
 }
 
-void CsvWriter::consumeRecord(const Record& rec) {
+void CsvWriter::consumeBatch(const RecordReader::RecordBatch& batch) {
     if (!m_file.is_open()) return;
 
-    for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
-        writeValue(m_file, rec, m_cachedAttrs[i]);
-        if (i < m_cachedAttrs.size() - 1) {
-            m_file << m_delimiter;
+    // Fast-path iteration over the memory block
+    for (size_t r = 0; r < batch.count; ++r) {
+        Record rec(batch.rule, const_cast<uint8_t*>(batch.data + r * batch.recordSize));
+
+        for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
+            writeValue(rec, m_cachedAttrs[i]);
+
+            if (i < m_cachedAttrs.size() - 1) {
+                m_file << m_delimiter;
+            }
         }
-    }
-    m_file << "\n";
-}
-
-void CsvWriter::onConsumeStop() {
-    if (m_file.is_open()) {
-        m_file.flush();
+        m_file << "\n";
     }
 }
 
-void CsvWriter::writeValue(std::ofstream& file, const Record& rec, const PAttr& attr) {
+void CsvWriter::writeValue(const Record& rec, const PAttr& attr) {
+    void* ptr = rec.getVoid(attr.id);
+    if (!ptr) return;
+
     switch (attr.type) {
-    case DataType::dtBool:
-        file << (rec.getBool(attr.id) ? "1" : "0");
-        break;
+    case DataType::dtBool:   m_file << (*static_cast<bool*>(ptr) ? "1" : "0"); break;
     case DataType::dtChar:
         if (attr.count > 1) {
-            file << "\"" << rec.getCharPtr(attr.id) << "\"";
+            m_file << "\"" << static_cast<char*>(ptr) << "\"";
         } else {
-            file << rec.getChar(attr.id);
+            m_file << *static_cast<char*>(ptr);
         }
         break;
-    case DataType::dtInt8:   file << (int)rec.getInt8(attr.id); break;
-    case DataType::dtUInt8:  file << (int)rec.getUInt8(attr.id); break;
-    case DataType::dtInt16:  file << rec.getInt16(attr.id); break;
-    case DataType::dtUInt16: file << rec.getUInt16(attr.id); break;
-    case DataType::dtInt32:  file << rec.getInt32(attr.id); break;
-    case DataType::dtUInt32: file << rec.getUInt32(attr.id); break;
-    case DataType::dtInt64:  file << rec.getInt64(attr.id); break;
-    case DataType::dtUInt64: file << rec.getUInt64(attr.id); break;
-    case DataType::dtFloat:  file << rec.getFloat(attr.id); break;
-    case DataType::dtDouble: file << rec.getDouble(attr.id); break;
+    case DataType::dtInt8:   m_file << static_cast<int>(*static_cast<int8_t*>(ptr)); break;
+    case DataType::dtUInt8:  m_file << static_cast<unsigned int>(*static_cast<uint8_t*>(ptr)); break;
+    case DataType::dtInt16:  m_file << *static_cast<int16_t*>(ptr); break;
+    case DataType::dtUInt16: m_file << *static_cast<uint16_t*>(ptr); break;
+    case DataType::dtInt32:  m_file << *static_cast<int32_t*>(ptr); break;
+    case DataType::dtUInt32: m_file << *static_cast<uint32_t*>(ptr); break;
+    case DataType::dtInt64:  m_file << *static_cast<int64_t*>(ptr); break;
+    case DataType::dtUInt64: m_file << *static_cast<uint64_t*>(ptr); break;
+    case DataType::dtFloat:  m_file << *static_cast<float*>(ptr); break;
+    case DataType::dtDouble: m_file << *static_cast<double*>(ptr); break;
+    case DataType::dtPtr:    m_file << reinterpret_cast<uintptr_t>(*static_cast<void**>(ptr)); break;
     default: break;
     }
 }
 
 void CsvWriter::setupFile() {
     std::string expectedHeader = generateHeader();
+    std::ifstream inFile(m_filename);
 
-    bool fileExists = false;
+    bool exists = inFile.is_open();
     bool headerMatches = false;
     bool isEmpty = true;
 
-    {
-        std::ifstream inFile(m_filename);
-        if (inFile.good()) {
-            fileExists = true;
-            if (inFile.peek() != std::ifstream::traits_type::eof()) {
-                isEmpty = false;
-                std::string firstLine;
-                std::getline(inFile, firstLine);
-                // Handle potential Windows line endings
-                if (!firstLine.empty() && firstLine.back() == '\r') {
-                    firstLine.pop_back();
-                }
-                if (firstLine == expectedHeader) {
-                    headerMatches = true;
-                }
+    if (exists) {
+        std::string firstLine;
+        if (std::getline(inFile, firstLine)) {
+            isEmpty = false;
+            // Handle cross-platform line endings
+            if (!firstLine.empty() && firstLine.back() == '\r') {
+                firstLine.pop_back();
             }
+            headerMatches = (firstLine == expectedHeader);
         }
+        inFile.close();
     }
 
-    if (!fileExists || isEmpty) {
+    if (!exists || isEmpty) {
         m_file.open(m_filename, std::ios::out);
         m_file << expectedHeader << "\n";
         m_file.flush();
     } else if (headerMatches) {
         m_file.open(m_filename, std::ios::app);
     } else {
-        // File exists but header mismatch -> create new file with timestamp suffix
-        std::string newFilename = createSuffixedFilename(m_filename);
-        m_filename = newFilename;
+        m_filename = createSuffixedFilename(m_filename);
         m_file.open(m_filename, std::ios::out);
         m_file << expectedHeader << "\n";
         m_file.flush();
@@ -129,7 +128,10 @@ void CsvWriter::setupFile() {
 std::string CsvWriter::generateHeader() const {
     std::stringstream ss;
     for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
-        ss << m_cachedAttrs[i].name << (i < m_cachedAttrs.size() - 1 ? "," : "");
+        ss << m_cachedAttrs[i].name;
+        if (i < m_cachedAttrs.size() - 1) {
+            ss << m_delimiter;
+        }
     }
     return ss.str();
 }
@@ -146,14 +148,11 @@ std::string CsvWriter::createSuffixedFilename(const std::string &originalName) c
     char timeStr[32];
     std::strftime(timeStr, sizeof(timeStr), "_%Y%m%d_%H%M%S", &buf);
 
-    size_t lastDot = originalName.find_last_of('.');
-    if (lastDot == std::string::npos) {
-        return originalName + timeStr;
-    } else {
-        std::string base = originalName.substr(0, lastDot);
-        std::string ext = originalName.substr(lastDot);
-        return base + timeStr + ext;
+    size_t dotPos = originalName.find_last_of('.');
+    if (dotPos != std::string::npos && dotPos > 0) {
+        return originalName.substr(0, dotPos) + timeStr + originalName.substr(dotPos);
     }
+    return originalName + timeStr;
 }
 
 } // namespace cyc

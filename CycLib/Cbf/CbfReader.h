@@ -4,60 +4,52 @@
 #ifndef CYC_CBFREADER_H
 #define CYC_CBFREADER_H
 
-#include "RecordProducer.h" // Здесь теперь BatchRecordProducer
-#include "CbfDefs.h"
-#include <string>
-#include <fstream>
-#include <vector>
+#include "RecordProducer.h"
+#include "CbfFile.h"
 
 namespace cyc {
 
 /**
- * @brief Читает CBF файл и генерирует поток записей.
- * Использует BatchRecordProducer для прямой записи с диска в буфер обмена.
+ * @class CbfReader
+ * @brief Reads CBF files and generates a stream of records.
+ *
+ * Uses BatchRecordProducer to directly copy large binary blocks from the disk
+ * into the internal buffer, bypassing per-record allocations.
  */
 class CYCLIB_EXPORT CbfReader : public BatchRecordProducer {
 public:
     /**
-     * @param filename Имя файла.
-     * @param bufferCapacity Размер кольцевого буфера.
-     * @param autoStart Запустить чтение сразу.
-     * @param readBatchSize (Устарело/Игнорируется в Batch режиме) - размер блока чтения определятся Writer'ом.
-     * @param writerBatchSize Размер блока записи (и чтения с диска).
+     * @brief Constructs the CBF Reader.
+     * @param filename Path to the input file.
+     * @param bufferCapacity Maximum records the circular buffer can hold.
+     * @param autoStart Automatically start reading in a background thread.
+     * @param writerBatchSize Number of records to read per physical I/O request.
      */
     CbfReader(const std::string& filename,
               size_t bufferCapacity = 100000,
               bool autoStart = true,
-              size_t writerBatchSize = 1000); // readBatchSize убран, т.к. зависит от writerBatchSize
+              size_t writerBatchSize = 1000);
 
     ~CbfReader() override;
 
-    bool isValid() const;
+    [[nodiscard]] bool isValid() const;
 
 protected:
     RecRule defineRule() override;
 
     /**
-     * @brief Читает блок данных из файла напрямую в буфер writer'а.
+     * @brief Reads a raw byte block directly into the producer batch.
      */
     size_t produceBatch(const RecordWriter::RecordBatch& batch) override;
 
     void onProduceStop() override;
 
 private:
-    /**
-     * @brief Читает заголовок секции CBF.
-     */
-    bool readSectionHeader(CbfSectionHeader& header);
-
-private:
     std::string m_filename;
-    std::ifstream m_file;
-
-    // State
+    CbfFile m_cbfFile;
     size_t m_recordSize;
     bool m_valid;
-    int64_t m_dataBytesRemaining; // Сколько байт осталось в текущей Data секции (-1 если бесконечно)
+    int64_t m_dataBytesRemaining;
 };
 
 } // namespace cyc

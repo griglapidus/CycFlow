@@ -6,77 +6,84 @@
 
 #include "RecordConsumer.h"
 #include "Core/PAttr.h"
-#include <string>
 #include <fstream>
-#include <vector>
 
 namespace cyc {
 
 /**
- * @brief Writes records from RecBuffer to a CSV file.
+ * @class CsvWriter
+ * @brief Writes data records from a RecBuffer to a CSV file.
  *
- * Inherits thread management and reader interaction from RecordConsumer.
- * This class focuses solely on file I/O and CSV formatting.
+ * Inherits from BatchRecordConsumer to process records in bulk, drastically
+ * reducing virtual call overhead. Formats memory blocks as comma-separated
+ * values and writes them to the specified output file.
  */
-class CYCLIB_EXPORT CsvWriter : public RecordConsumer {
+class CYCLIB_EXPORT CsvWriter : public BatchRecordConsumer {
 public:
     /**
      * @brief Constructs the CSV writer.
      * @param filename Path to the output CSV file.
      * @param buffer Shared pointer to the source RecBuffer.
      * @param autoStart If true, the worker thread starts immediately.
-     * @param readerBatchSize Number of records to read in one batch (passed to base class).
+     * @param batchSize Number of records to read and process in one iteration.
      */
     CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
-              bool autoStart = true, size_t readerBatchSize = 100);
+              bool autoStart = true, size_t batchSize = 100);
 
     /**
-     * @brief Destructor.
-     * Ensures the file is flushed and closed properly.
+     * @brief Destructor. Ensures the thread is stopped and the file is closed.
      */
     ~CsvWriter() override;
 
 protected:
     /**
-     * @brief Processes a single record fetched by the base class.
-     * formats the record as a CSV line and writes it to the file.
-     * @param rec The record to write.
+     * @brief Processes a batch of records in a tight loop.
+     * @param batch The contiguous block of memory containing records.
      */
-    void consumeRecord(const Record& rec) override;
+    void consumeBatch(const RecordReader::RecordBatch& batch) override;
 
     /**
-     * @brief Called by the worker thread just before it stops.
-     * Used here to flush the file stream.
+     * @brief Called by the worker thread just before the main loop starts.
+     * Opens the file and writes the header if necessary.
+     */
+    void onConsumeStart() override;
+
+    /**
+     * @brief Called by the worker thread just after the loop terminates.
+     * Flushes and closes the file safely.
      */
     void onConsumeStop() override;
 
 private:
     /**
-     * @brief Formats and writes a single field value.
+     * @brief Formats and writes a single typed field value directly to the stream.
+     * @param rec The record containing the field.
+     * @param attr The attribute metadata describing the field.
      */
-    void writeValue(std::ofstream& file, const Record& rec, const PAttr& attr);
+    void writeValue(const Record& rec, const PAttr& attr);
 
     /**
-     * @brief Prepares the output file for writing (creates or appends).
+     * @brief Prepares the output file for writing (creates new or appends).
      */
     void setupFile();
 
     /**
      * @brief Generates the CSV header line based on the record schema.
+     * @return Formatted header string.
      */
-    std::string generateHeader() const;
+    [[nodiscard]] std::string generateHeader() const;
 
     /**
-     * @brief Generates a unique filename if the original file exists and has a mismatching header.
+     * @brief Generates a unique filename using a timestamp if a header mismatch occurs.
+     * @param originalName The base filename.
+     * @return A new filename appended with the current timestamp.
      */
-    std::string createSuffixedFilename(const std::string& originalName) const;
+    [[nodiscard]] std::string createSuffixedFilename(const std::string& originalName) const;
 
 private:
     std::string m_filename;
     std::string m_delimiter;
     std::ofstream m_file;
-
-    // Local cache of attributes to avoid querying the rule/reader for every record
     std::vector<PAttr> m_cachedAttrs;
 };
 

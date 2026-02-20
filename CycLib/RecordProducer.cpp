@@ -18,39 +18,46 @@ RecordProducer::~RecordProducer() {
 }
 
 void RecordProducer::initialize() {
+    // Fast path: lock-free check using acquire semantics
+    if (m_isInitialized.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Slow path: lock and double-check
     std::lock_guard<std::mutex> lock(m_initMtx);
-    if (m_isInitialized) return;
+    if (m_isInitialized.load(std::memory_order_relaxed)) {
+        return;
+    }
+
     RecRule rule = defineRule();
-    if(rule.getAttributes().empty()) return;
+    if (rule.getAttributes().empty()) {
+        return;
+    }
+
     m_buffer = std::make_shared<RecBuffer>(rule, m_bufferCapacity);
     m_writer = std::make_unique<RecordWriter>(m_buffer, m_writerBatchSize, true);
 
-    m_isInitialized = true;
+    // Publish the initialized state safely
+    m_isInitialized.store(true, std::memory_order_release);
 }
 
 std::shared_ptr<RecBuffer> RecordProducer::getBuffer() {
-    if (!m_isInitialized) {
-        initialize();
-    }
+    initialize();
     return m_buffer;
 }
 
 RecordWriter& RecordProducer::getWriter() {
-    if (!m_isInitialized) {
-        initialize();
-    }
+    initialize();
     return *m_writer;
 }
 
 void RecordProducer::start() {
-    if (m_running.load()) return;
+    if (m_running.load(std::memory_order_acquire)) return;
 
-    // Гарантируем, что всё создано перед запуском потока
     initialize();
-
     if (!m_buffer || !m_writer) return;
 
-    m_running.store(true);
+    m_running.store(true, std::memory_order_release);
     m_worker = std::thread(&RecordProducer::workerLoop, this);
 }
 
@@ -58,7 +65,6 @@ void RecordProducer::stop() {
     bool expected = true;
     if (!m_running.compare_exchange_strong(expected, false)) return;
 
-    // Сбрасываем данные, только если writer был создан
     if (m_writer) {
         m_writer->flush();
     }
@@ -75,46 +81,49 @@ void RecordProducer::join() {
 }
 
 bool RecordProducer::isRunning() const {
-    return m_running.load();
+    return m_running.load(std::memory_order_acquire);
 }
 
 void RecordProducer::workerLoop() {
     onProduceStart();
 
-    while (m_running.load()) {
+    while (m_running.load(std::memory_order_relaxed)) {
         Record rec = m_writer->nextRecord();
         if (!produceStep(rec)) {
             break;
         }
         m_writer->commitRecord();
     }
+
     m_writer->flush();
-    m_running.store(false);
+    m_running.store(false, std::memory_order_release);
 
     onProduceStop();
 }
 
+// --- BatchRecordProducer Implementation ---
+
 void BatchRecordProducer::workerLoop() {
     onProduceStart();
 
-    while (m_running.load()) {
-        auto batch = m_writer->nextBatch();
+    while (m_running.load(std::memory_order_relaxed)) {
+        auto batch = m_writer->nextBatch(m_writerBatchSize, true);
 
         if (!batch.isValid()) {
             break;
         }
 
-        size_t writtenCount = produceBatch(batch);
+        size_t written = produceBatch(batch);
+        m_writer->commitBatch(written);
 
-        if (writtenCount > 0) {
-            m_writer->commitBatch(writtenCount);
-        } else {
-            break;
+        if (written == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
     m_writer->flush();
-    m_running.store(false);
+    m_running.store(false, std::memory_order_release);
+
     onProduceStop();
 }
 

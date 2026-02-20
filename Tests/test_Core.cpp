@@ -1,10 +1,12 @@
+// test_Core.cpp
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <thread>
 #include <algorithm>
-#include <Csv/CsvWriter.h>
 
 #include "Core/PReg.h"
 #include "Core/PAttr.h"
@@ -28,7 +30,7 @@ TEST(PRegTest, UniqueIDs) {
     EXPECT_EQ(PReg::getName(id1), "ParamA");
 }
 
-// Verifies the calculation of byte offsets for attributes within a record, including the header.
+// Verifies the calculation of byte offsets for attributes within a record, including the implicit header.
 TEST(RecRuleTest, OffsetCalculation) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("IntVal", DataType::dtInt32, 1);
@@ -36,7 +38,7 @@ TEST(RecRuleTest, OffsetCalculation) {
     attrs.emplace_back("StrVal", DataType::dtChar, 10);
 
     RecRule rule(attrs);
-    const size_t HEADER_SIZE = 8;
+    const size_t HEADER_SIZE = 8; // TimeStamp is 8 bytes
 
     EXPECT_EQ(rule.getRecSize(), HEADER_SIZE + 4 + 8 + 10);
 
@@ -67,7 +69,6 @@ TEST(RecordTest, DataAccess) {
     EXPECT_DOUBLE_EQ(rec.getDouble(idDbl), 3.14159);
 
     size_t offsetInt = rule.getOffsetById(idInt);
-
     ASSERT_GT(offsetInt, 0u);
 
     int32_t* rawIntPtr = reinterpret_cast<int32_t*>(rawData.data() + offsetInt);
@@ -115,9 +116,9 @@ TEST(RecBufferTest, WriteAndReadRelative) {
     size_t recSize = rule.getRecSize();
     std::vector<uint8_t> rawBatch(recSize * 5, 0);
 
-    for(int i=0; i<5; ++i) {
+    for(int i = 0; i < 5; ++i) {
         Record r(rule, rawBatch.data() + (i * recSize));
-        r.setInt32(PReg::getID("Val"), (i+1)*10);
+        r.setInt32(PReg::getID("Val"), (i + 1) * 10);
     }
 
     buffer.push(rawBatch.data(), 5);
@@ -131,22 +132,21 @@ TEST(RecBufferTest, WriteAndReadRelative) {
     EXPECT_EQ(rRead.getInt32(PReg::getID("Val")), 20);
 }
 
-class AsyncIntegrationTest : public ::testing::TestWithParam<std::tuple<double, double>> {
-};
+class AsyncIntegrationTest : public ::testing::TestWithParam<std::tuple<double, double>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     StandardSuite,
     AsyncIntegrationTest,
     ::testing::Combine(
-        ::testing::Values(0.2,1),
-        ::testing::Values(0.2,1)
+        ::testing::Values(0.2, 1),
+        ::testing::Values(0.2, 1)
         )
     );
 
 // Validates the interaction between separate producer and consumer threads using RecordWriter/Reader.
 TEST_P(AsyncIntegrationTest, WriteReadFlow) {
     int idVal = PReg::getID("Val");
-    std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32)};
+    std::vector<PAttr> attrs = { PAttr("Val", DataType::dtInt32) };
     RecRule rule(attrs);
 
     double p1 = std::get<0>(GetParam());
@@ -154,8 +154,8 @@ TEST_P(AsyncIntegrationTest, WriteReadFlow) {
 
     std::shared_ptr<RecBuffer> mainBuffer = std::make_shared<RecBuffer>(rule, 50000);
 
-    RecordWriter writer(mainBuffer, (size_t)(10000 * p1));
-    RecordReader reader(mainBuffer, (size_t)(10000 * p2));
+    RecordWriter writer(mainBuffer, static_cast<size_t>(10000 * p1));
+    RecordReader reader(mainBuffer, static_cast<size_t>(10000 * p2));
 
     const int TOTAL_RECORDS = 100000;
 
@@ -173,6 +173,7 @@ TEST_P(AsyncIntegrationTest, WriteReadFlow) {
         Record r = reader.nextRecord();
         receivedData[i] = r.getInt32(idVal);
     }
+
     producer.join();
 
     ASSERT_EQ(receivedData.size(), TOTAL_RECORDS);

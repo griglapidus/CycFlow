@@ -6,30 +6,33 @@
 
 #include "Core/CycLib_global.h"
 #include "RecordConsumer.h"
-#include "TcpDefs.h"
 #include <asio.hpp>
-#include <vector>
 
 namespace cyc {
 
 /**
+ * @class TcpDataSender
  * @brief Serves data requests from a connected client.
- * Inherits RecordConsumer to manage the Reader lifecycle, but overrides
- * the loop to act as a Server (Request-Response).
+ *
+ * Inherits RecordConsumer to manage the underlying RecordReader lifecycle,
+ * but overrides the main loop to act as a TCP Request-Response server.
  */
 class CYCLIB_EXPORT TcpDataSender : public RecordConsumer {
 public:
     TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket);
-    virtual ~TcpDataSender();
+    ~TcpDataSender() override;
 
 protected:
     /**
-     * @brief Custom loop to handle request-response cycle.
-     * Waits for RequestDataBatch -> Reads from Reader -> Sends Response.
+     * @brief Custom loop to handle the request-response cycle.
+     * Waits for RequestDataBatch -> Reads from RecBuffer -> Sends Response.
      */
     void workerLoop() override;
 
-    void consumeRecord(const Record& rec) override {}
+    /**
+     * @brief Disabled single-record consumption (uses manual batching).
+     */
+    void consumeRecord(const Record& rec) final {}
 
 private:
     asio::ip::tcp::socket m_socket;

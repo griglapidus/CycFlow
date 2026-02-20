@@ -6,7 +6,8 @@
 #include "TcpDefs.h"
 #include <thread>
 #include <vector>
-#include <iostream> // Добавлено для логов ошибок, если нужно
+#include <iostream>
+#include <algorithm>
 
 namespace cyc {
 
@@ -39,6 +40,7 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
     std::vector<uint8_t> payload;
     asio::error_code ec;
 
+    // Wait for the initial request
     if (!MessageUtils::receiveMessage(socket, header, payload, ec)) {
         return;
     }
@@ -52,7 +54,6 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                     listStr += pair.first + "\n";
                 }
             }
-            // Проверка возврата, хотя после break мы все равно выходим
             MessageUtils::sendMessage(socket, MessageType::ResponseBufferList, listStr, ec);
             break;
         }
@@ -80,26 +81,24 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
         case MessageType::RequestDataStream: {
             std::string bufferName(payload.begin(), payload.end());
             std::shared_ptr<RecBuffer> targetBuffer;
-
             {
                 std::shared_lock<std::shared_mutex> lock(m_buffersMtx);
-                if (m_buffers.count(bufferName)) {
-                    targetBuffer = m_buffers[bufferName];
+                auto it = m_buffers.find(bufferName);
+                if (it != m_buffers.end()) {
+                    targetBuffer = it->second;
                 }
             }
 
             if (targetBuffer) {
                 std::string ruleText = targetBuffer->getRule().toText();
-
-                // ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL
                 if (!MessageUtils::sendMessage(socket, MessageType::ResponseRecRule, ruleText, ec)) {
-                    // Если не удалось отправить подтверждение, разрываем связь
+                    // Failed to send the schema, abort connection
                     return;
                 }
 
                 cleanupDeadSenders();
 
-                // Создаем sender
+                // Handover the socket to a new TcpDataSender session
                 auto sender = std::make_shared<TcpDataSender>(
                     targetBuffer,
                     std::move(socket)
@@ -111,7 +110,7 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                 }
 
                 sender->start();
-                return;
+                return; // Socket ownership transferred, exit handler
 
             } else {
                 MessageUtils::sendMessage(socket, MessageType::ResponseError, "Buffer not found", ec);
@@ -126,15 +125,16 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
     }
 }
 
-void TcpServer::cleanupDeadSenders()
-{
+void TcpServer::cleanupDeadSenders() {
     std::lock_guard<std::mutex> lock(m_sendersMtx);
-    auto it = std::remove_if(m_activeSenders.begin(), m_activeSenders.end(),
-                             [](const std::shared_ptr<TcpDataSender>& sender) {
-                                 return !sender->isRunning();
-                             });
-
-    m_activeSenders.erase(it, m_activeSenders.end());
+    // Correct erase-remove idiom to safely delete stopped sessions
+    m_activeSenders.erase(
+        std::remove_if(m_activeSenders.begin(), m_activeSenders.end(),
+                       [](const std::shared_ptr<TcpDataSender>& sender) {
+                           return !sender->isRunning();
+                       }),
+        m_activeSenders.end()
+    );
 }
 
 } // namespace cyc

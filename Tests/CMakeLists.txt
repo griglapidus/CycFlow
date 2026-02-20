@@ -19,13 +19,10 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(CycTests
-  test_main.cpp
-  test_CsvWriter.cpp
-  CbfTest.cpp
-  CbfWriterTest.cpp
-  CbfReaderTest.cpp
-  TcpTests.cpp
-  TcpIntegrationTests.cpp
+  test_Core.cpp
+  test_Cbf.cpp
+  test_Csv.cpp
+  test_Tcp.cpp
 )
 
 target_link_libraries(CycTests PRIVATE CycLib GTest::gtest_main)

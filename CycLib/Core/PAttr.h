@@ -10,11 +10,12 @@
 namespace cyc {
 
 /**
- * @brief Describes a single attribute (field) within a record.
+ * @struct PAttr
+ * @brief Describes a single attribute (field) within a record schema.
  */
 struct CYCLIB_EXPORT PAttr {
     int id;             ///< Unique ID of the attribute (from PReg).
-    char name[26];      ///< Name of the attribute.
+    char name[26];      ///< Name of the attribute (max 25 chars + null terminator).
     DataType type;      ///< Data type of the attribute.
     size_t count;       ///< Number of elements (for arrays). Default is 1.
     size_t offset;      ///< Byte offset within the record structure.
@@ -25,7 +26,7 @@ struct CYCLIB_EXPORT PAttr {
     PAttr();
 
     /**
-     * @brief Constructs an attribute.
+     * @brief Constructs an attribute and automatically assigns it a unique ID via PReg.
      * @param _name Name of the attribute.
      * @param _type Data type.
      * @param _count Number of elements (default 1).
@@ -36,7 +37,7 @@ struct CYCLIB_EXPORT PAttr {
      * @brief Calculates the total size of this attribute in bytes.
      * @return Size in bytes (type size * count).
      */
-    size_t getSize() const;
+    [[nodiscard]] size_t getSize() const;
 };
 
 } // namespace cyc

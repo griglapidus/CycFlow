@@ -10,7 +10,7 @@ CbfWriter::CbfWriter(const std::string& filename,
                      std::shared_ptr<RecBuffer> buffer,
                      bool autoStart,
                      size_t batchSize)
-    : BatchRecordConsumer(buffer, batchSize) // Инициализируем BatchConsumer
+    : BatchRecordConsumer(buffer, batchSize)
     , m_filename(filename)
     , m_alias("Default")
 {
@@ -28,7 +28,6 @@ void CbfWriter::setAlias(const std::string& alias) {
 }
 
 void CbfWriter::onConsumeStart() {
-    // 1. Открываем файл
     if (!m_cbfFile.open(m_filename, CbfMode::Write)) {
         std::cerr << "CbfWriter: Failed to open file " << m_filename << std::endl;
         return;
@@ -36,15 +35,14 @@ void CbfWriter::onConsumeStart() {
 
     m_cbfFile.setAlias(m_alias);
 
-    // 2. Пишем заголовок (Схему)
     const RecRule& rule = getReader().getRule();
+
     if (!m_cbfFile.writeHeader(rule)) {
-        std::cerr << "CbfWriter: Failed to write header" << std::endl;
+        std::cerr << "CbfWriter: Failed to write RecRule header" << std::endl;
         m_cbfFile.close();
         return;
     }
 
-    // 3. Начинаем секцию данных
     if (!m_cbfFile.beginDataSection()) {
         std::cerr << "CbfWriter: Failed to begin data section" << std::endl;
         m_cbfFile.close();
@@ -53,22 +51,17 @@ void CbfWriter::onConsumeStart() {
 }
 
 void CbfWriter::consumeBatch(const RecordReader::RecordBatch& batch) {
-    if (!m_cbfFile.isOpen()) return;
+    if (batch.count == 0) return;
 
-    // Оптимизация: пишем весь блок памяти сразу
-    // RecordBatch гарантирует, что данные лежат непрерывно
-    size_t totalBytes = batch.count * batch.recordSize;
+    size_t bytesToWrite = batch.count * batch.recordSize;
 
-    if (totalBytes > 0) {
-        m_cbfFile.writeBytes(batch.data, totalBytes);
+    if (!m_cbfFile.writeBytes(batch.data, bytesToWrite)) {
+        std::cerr << "CbfWriter: Failed to write data block of size " << bytesToWrite << std::endl;
     }
 }
 
 void CbfWriter::onConsumeStop() {
-    if (m_cbfFile.isOpen()) {
-        m_cbfFile.endDataSection();
-        m_cbfFile.close();
-    }
+    m_cbfFile.close(); // Implicitly calls endDataSection()
 }
 
 } // namespace cyc

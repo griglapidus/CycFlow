@@ -8,13 +8,14 @@
 #include "DynamicChunkBuffer.h"
 #include "IRecBufferClient.h"
 #include "RecRule.h"
+#include "Record.h"
 #include <condition_variable>
 #include <functional>
-#include "Record.h"
 
 namespace cyc {
 
 /**
+ * @class RecBuffer
  * @brief High-level storage class for structured records.
  *
  * Encapsulates the record schema (RecRule) and the underlying storage mechanism
@@ -39,7 +40,7 @@ public:
 
     /**
      * @brief Reads data based on an absolute global cursor.
-     * Thread-safe: recalculates relative offset under lock to avoid race conditions.
+     * @note Thread-safe: recalculates relative offset under lock to avoid race conditions.
      * @param globalCursor The absolute position (totalWritten index) to read from.
      * @param dest Destination buffer.
      * @param count Number of records to read.
@@ -49,10 +50,6 @@ public:
 
     /**
      * @brief Reads records relative to the current buffer window.
-     *
-     * Provides random access within the currently cached window of records.
-     * Useful for history lookups.
-     *
      * @param index Relative index (0 is the oldest available record in the buffer).
      * @param dest Destination memory buffer.
      * @param count Number of records to read.
@@ -60,65 +57,51 @@ public:
     void readRelative(size_t index, void* dest, size_t count) const;
 
     /**
-     * @brief Предоставляет доступ к записи по индексу без копирования (где это возможно).
-     * @param index Относительный индекс записи (0..size-1).
-     * @param visitor Функция-калбек, которая примет Record.
-     * ВНИМАНИЕ: Record валиден только внутри callback'а! Не сохраняйте указатель из него.
+     * @brief Provides zero-copy access to a record by index.
+     * @param index Relative index of the record.
+     * @param visitor Callback function to process the Record.
+     * @warning The Record is only valid inside the callback. Do not store its pointer.
      */
     void processRecord(size_t index, std::function<void(const Record&)> visitor) const;
 
     /**
-     * @brief Gets the rule defining the record structure.
-     * @return Reference to RecRule.
+     * @brief Safely copies a record at a specific index into a pre-allocated Record object.
+     * @param index Relative index of the record.
+     * @param dest Pre-allocated Record object. Must have valid memory and matching size.
+     * @return true if successful, false if index is out of bounds or dest is invalid.
      */
-    const RecRule& getRule() const;
+    bool copyRecord(size_t index, Record& dest) const;
 
-    /**
-     * @brief Gets the size of a single record in bytes.
-     * @return Size in bytes.
-     */
-    size_t getRecSize() const;
-
-    /**
-     * @brief Gets the number of records currently stored in the buffer.
-     * @return Count of records.
-     */
-    size_t size() const;
-
-    /**
-     * @brief Gets the maximum capacity of the buffer.
-     * @return Capacity in records.
-     */
-    size_t capacity() const;
+    [[nodiscard]] const RecRule& getRule() const;
+    [[nodiscard]] size_t getRecSize() const;
+    [[nodiscard]] size_t size() const;
+    [[nodiscard]] size_t capacity() const;
 
     /**
      * @brief Gets the total number of records written over the lifetime of the buffer.
-     * This is a monotonically increasing counter, unlike size().
      * @return Total count.
      */
-    uint64_t getTotalWritten() const;
+    [[nodiscard]] uint64_t getTotalWritten() const;
 
-    std::tuple<uint64_t, size_t> getTotalWrittenAndSize() const;
+    [[nodiscard]] std::tuple<uint64_t, size_t> getTotalWrittenAndSize() const;
 
     void addClient(IRecBufferClient* client);
     void removeClient(IRecBufferClient* client);
 
     /**
      * @brief Calculates how many records can be written without overwriting unread data.
-     * Checks the cursors of all registered readers.
      * @return Number of records available for writing.
      */
-    size_t getAvailableWriteSpace() const;
+    [[nodiscard]] size_t getAvailableWriteSpace() const;
 
     /**
-     * @brief Блокирует поток до тех пор, пока не появится свободное место
-     * или не сработает условие прерывания (stopCondition).
-     * @param stopCondition Функция, возвращающая true, если ожидание нужно прервать (например, остановка писателя).
+     * @brief Blocks the thread until space becomes available or the stop condition is met.
+     * @param stopCondition Function returning true if waiting should be interrupted.
      */
-    void waitForSpace(std::function<bool()> stopCondition);
+    void waitForSpace(const std::function<bool()>& stopCondition);
 
     /**
-     * @brief Уведомляет писателей о том, что место освободилось (вызывается читателями).
+     * @brief Notifies writers that space has been freed.
      */
     void notifyWriters();
 
@@ -130,11 +113,13 @@ private:
 private:
     RecRule m_rule;
     DynamicChunkBuffer m_impl;
+
     mutable std::shared_mutex m_dataRwMtx;
-    std::vector<IRecBufferClient*> m_clients;
-    mutable uint64_t m_phantomReadCursor;
     mutable std::mutex m_syncMtx;
     std::condition_variable m_spaceCv;
+
+    std::vector<IRecBufferClient*> m_clients;
+    mutable uint64_t m_phantomReadCursor;
 };
 
 } // namespace cyc

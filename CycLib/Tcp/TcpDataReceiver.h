@@ -1,71 +1,74 @@
-// TcpDataReceiver.h
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
 
 #ifndef CYC_TCPDATARECEIVER_H
 #define CYC_TCPDATARECEIVER_H
 
 #include "Core/CycLib_global.h"
-#include "RecordProducer.h" // Наследуемся от базового RecordProducer
+#include "RecordProducer.h"
 #include "TcpDefs.h"
 #include <asio.hpp>
 #include <string>
-#include <atomic>
 
 namespace cyc {
 
 /**
- * @brief Принимает данные по TCP в режиме Request-Response и пишет их в RecBuffer.
+ * @class TcpDataReceiver
+ * @brief Receives streaming data over TCP and writes directly to a RecBuffer.
+ *
+ * Connects to a TcpServer, negotiates the RecRule schema, and continuously
+ * requests data batches. Uses zero-copy reads to push data straight into
+ * the underlying circular buffer memory.
  */
 class CYCLIB_EXPORT TcpDataReceiver : public RecordProducer {
 public:
     /**
-     * @param bufferCapacity Емкость создаваемого буфера.
-     * @param writerBatchSize Размер пакета записи (максимальный размер транзакции).
+     * @brief Constructs the receiver.
+     * @param bufferCapacity Maximum number of records the target buffer can hold.
+     * @param writerBatchSize Number of records to request per network transaction.
      */
     TcpDataReceiver(size_t bufferCapacity = 65536, size_t writerBatchSize = 1000);
     ~TcpDataReceiver() override;
 
     /**
-     * @brief Подключается к серверу, выполняет handshake и запускает поток.
+     * @brief Connects to the server, performs handshake, and starts the receive loop.
+     * @param host Server hostname or IP address.
+     * @param port Server TCP port.
+     * @param bufferName Target buffer name to request from the server.
+     * @return True if connection and handshake succeed.
      */
     bool connect(const std::string& host, uint16_t port, const std::string& bufferName);
 
     /**
-     * @brief Останавливает прием и разрывает соединение.
+     * @brief Safely disconnects and stops the worker thread.
      */
     void stop();
 
-    bool isConnected() const;
+    [[nodiscard]] bool isConnected() const;
 
 protected:
-    /**
-     * @brief Возвращает правило, согласованное при connect().
-     */
     RecRule defineRule() override;
 
     /**
-     * @brief Основной цикл работы: Запрос -> Ожидание -> Чтение -> Commit.
+     * @brief Custom worker loop for the Request-Response TCP cycle.
      */
     void workerLoop() override;
 
-    /**
-     * @brief Хук перед запуском цикла (опционально).
-     */
     void onProduceStart() override {}
-
-    /**
-     * @brief Хук после остановки цикла.
-     */
     void onProduceStop() override;
 
-    bool produceStep(Record& rec) override final { return false; }
+    /**
+     * @brief Disabled single-record production (uses manual batching in workerLoop).
+     */
+    bool produceStep(Record& rec) final { return false; }
+
 private:
     asio::io_context m_ioContext;
     asio::ip::tcp::socket m_socket;
 
     RecRule m_negotiatedRule;
     bool m_connected;
-    size_t m_writerBatchSize; // Храним желаемый размер батча
+    size_t m_writerBatchSize;
 };
 
 } // namespace cyc

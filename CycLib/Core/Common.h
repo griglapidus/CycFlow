@@ -5,7 +5,6 @@
 #define CYC_COMMON_H
 
 #include <cstdint>
-#include <cstddef> // Added for size_t
 #include "CycLib_global.h"
 
 namespace cyc {

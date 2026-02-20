@@ -6,17 +6,15 @@
 
 #include "Core/CycLib_global.h"
 #include "RecordReader.h"
-#include <atomic>
-#include <thread>
-#include <memory>
 
 namespace cyc {
 
 /**
+ * @class RecordConsumer
  * @brief Base class for consuming records from RecBuffer asynchronously.
  *
- * It manages the AsyncRecordReader and a background worker thread.
- * Concrete implementations (like CsvWriter) must override consumeRecord().
+ * Manages an AsyncRecordReader and a background worker thread.
+ * Concrete implementations (e.g., CsvWriter) must override consumeRecord().
  */
 class CYCLIB_EXPORT RecordConsumer {
 public:
@@ -29,64 +27,67 @@ public:
     void start();
 
     /**
-     * @brief Stops the consumption thread immediately.
+     * @brief Stops the consumption thread immediately without waiting for remaining data.
      */
     void stop();
 
     /**
-     * @brief Consumes all remaining records up to the current point, then stops.
+     * @brief Consumes all remaining records up to the current buffer cursor, then stops.
      */
     void finish();
 
-    bool isRunning() const;
+    [[nodiscard]] bool isRunning() const;
 
 protected:
     /**
-     * @brief Lifecycle hook: Called inside the thread before the loop starts.
+     * @brief Lifecycle hook: Called inside the thread before the main loop starts.
      */
     virtual void onConsumeStart() {}
 
     /**
-     * @brief Pure virtual method to process a single record.
-     * @param rec The record fetched from the buffer.
+     * @brief Processes a single record fetched from the buffer.
+     * Must be implemented by the derived class.
+     * @param rec Read-only record view.
      */
     virtual void consumeRecord(const Record& rec) = 0;
 
     /**
-     * @brief Lifecycle hook: Called inside the thread after the loop ends.
+     * @brief Lifecycle hook: Called inside the thread after the main loop terminates.
      */
     virtual void onConsumeStop() {}
 
-    const RecordReader& getReader() const;
+    [[nodiscard]] const RecordReader& getReader() const;
 
     virtual void workerLoop();
 
 protected:
     std::unique_ptr<RecordReader> m_reader;
-    std::atomic_bool m_running;
+    std::atomic<bool> m_running;
     std::thread m_worker;
 };
 
+/**
+ * @class BatchRecordConsumer
+ * @brief Optimized consumer class for processing data in large contiguous blocks.
+ */
 class CYCLIB_EXPORT BatchRecordConsumer : public RecordConsumer {
 public:
-    using RecordConsumer::RecordConsumer; // Используем конструктор базового класса
+    using RecordConsumer::RecordConsumer;
 
 protected:
     /**
-     * @brief Заглушка для поштучного метода.
-     * Помечена final, чтобы никто случайно не попытался её использовать.
+     * @brief Blocked single-record consumption method.
+     * Marked as final to prevent misuse in batch mode.
      */
     void consumeRecord(const Record& rec) override final {}
 
     /**
-     * @brief Новый чисто виртуальный метод для обработки пакетов.
-     * Наследник ОБЯЗАН реализовать именно его.
+     * @brief Processes a batch of records at once.
+     * Must be implemented by the derived class.
+     * @param batch A contiguous memory block containing multiple records.
      */
     virtual void consumeBatch(const RecordReader::RecordBatch& batch) = 0;
 
-    /**
-     * @brief Переопределенный цикл, работающий с пакетами.
-     */
     void workerLoop() override;
 };
 

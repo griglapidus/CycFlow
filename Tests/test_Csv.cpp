@@ -1,11 +1,16 @@
+// test_Csv.cpp
+// SPDX-License-Identifier: MIT
+
 #define NOMINMAX
 #include <gtest/gtest.h>
 #include <fstream>
 #include <string>
-#include <synchapi.h>
 #include <vector>
 #include <cstdio>
 #include <sstream>
+#include <thread>
+#include <chrono>
+
 #include "Csv/CsvWriter.h"
 #include "Core/RecBuffer.h"
 #include "Core/RecRule.h"
@@ -19,12 +24,10 @@ class CsvWriterTest : public ::testing::TestWithParam<int> {
 protected:
     std::string filename = "test_output.csv";
 
-    // Removes the output file before the test runs to ensure a clean state.
     void SetUp() override {
         std::remove(filename.c_str());
     }
 
-    // Removes the output file after the test finishes to clean up resources.
     void TearDown() override {
         std::remove(filename.c_str());
     }
@@ -58,7 +61,6 @@ protected:
     }
 };
 
-// Verifies that the CSV file is created with the correct header row based on attributes.
 TEST_F(CsvWriterTest, CreatesFileWithHeader) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("ColInt", DataType::dtInt32);
@@ -75,7 +77,6 @@ TEST_F(CsvWriterTest, CreatesFileWithHeader) {
     EXPECT_EQ(lines[0], "TimeStamp,ColInt,ColDbl");
 }
 
-// Tests writing records with various data types and verifies the CSV formatting (precision, quotes).
 TEST_F(CsvWriterTest, WritesFormattedData) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("ID", DataType::dtInt32);
@@ -103,7 +104,6 @@ TEST_F(CsvWriterTest, WritesFormattedData) {
     EXPECT_EQ(lines[2], "1.000000,20,0.005000,\"TestB\"");
 }
 
-// Ensures that new records are appended to an existing file rather than overwriting it.
 TEST_F(CsvWriterTest, AppendsToExistingFile) {
     {
         std::ofstream f(filename);
@@ -128,7 +128,6 @@ TEST_F(CsvWriterTest, AppendsToExistingFile) {
     EXPECT_EQ(lines[2], "1.000000,2,2.200000");
 }
 
-// Checks if the writer can handle a large batch of records correctly.
 TEST_F(CsvWriterTest, HandlesManyRecords) {
     std::vector<PAttr> attrs = { PAttr("X", DataType::dtInt32) };
     RecRule rule(attrs);
@@ -139,7 +138,7 @@ TEST_F(CsvWriterTest, HandlesManyRecords) {
     std::vector<uint8_t> hugeBatch;
     hugeBatch.reserve(COUNT * rule.getRecSize());
 
-    for(int i=0; i<COUNT; ++i) {
+    for(int i = 0; i < COUNT; ++i) {
         std::vector<uint8_t> raw(rule.getRecSize());
         Record r(rule, raw.data());
         if(rule.getAttributes().size() > 0) r.setDouble(rule.getAttributes()[0].id, 1);
@@ -155,27 +154,25 @@ TEST_F(CsvWriterTest, HandlesManyRecords) {
     EXPECT_EQ(lines.back(), "1.000000,999");
 }
 
-// Simulates a production scenario with RecordWriter and verifies the integrity of written data.
 TEST_P(CsvWriterTest, LongRunningProducerConsumer) {
     std::vector<PAttr> attrs;
     attrs.emplace_back("Counter", DataType::dtInt32);
     RecRule rule(attrs);
     auto buffer = std::make_shared<RecBuffer>(rule, 2000);
-    cyc::RecordWriter writer(buffer, 100);
+
+    // Writer strictly blocks on full buffer to prevent data loss
+    cyc::RecordWriter writer(buffer, 100, true);
     cyc::CsvWriter csvWriter(filename, buffer, true, 100);
 
     const int totalRecords = 5000;
 
     for (int i = 0; i < totalRecords; ++i) {
         Record rec = writer.nextRecord();
-
         rec.setDouble(rule.getAttributes()[0].id, cyc::get_current_epoch_time());
         rec.setInt32(rule.getAttributes()[1].id, i);
-
         writer.commitRecord();
     }
     writer.flush();
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
     csvWriter.finish();
 
     auto lines = readLines(filename);

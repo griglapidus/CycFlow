@@ -5,16 +5,26 @@
 #define CYC_MESSAGEUTILS_H
 
 #include "Core/CycLib_global.h"
-#include <asio.hpp>
-#include <vector>
-#include <string>
-#include <cstdint>
 #include "TcpDefs.h"
+#include <asio.hpp>
 
 namespace cyc {
 
+/**
+ * @class MessageUtils
+ * @brief Utility class for standardizing network message serialization.
+ */
 class CYCLIB_EXPORT MessageUtils {
 public:
+    /**
+     * @brief Sends a standard TCP message with an optional string payload.
+     * Uses scatter-gather I/O to avoid unnecessary memory allocations.
+     * @param socket Connected TCP socket.
+     * @param type Message type.
+     * @param payload Payload string (can be empty).
+     * @param ec Error code populated on failure.
+     * @return True if sent successfully.
+     */
     static bool sendMessage(asio::ip::tcp::socket& socket, MessageType type, const std::string& payload, asio::error_code& ec) {
         TcpHeader header;
         header.type = type;
@@ -27,18 +37,21 @@ public:
             buffers.push_back(asio::buffer(payload));
         }
 
-        // asio::write записывает данные и выставляет ec в случае ошибки
         asio::write(socket, buffers, ec);
-
-        // Возвращаем true, если ошибки нет (!ec равносильно ec == 0)
         return !ec;
     }
 
+    /**
+     * @brief Receives a standard TCP message and reads its string payload.
+     * @param socket Connected TCP socket.
+     * @param header Header structure populated by the read.
+     * @param payload Vector populated with incoming bytes.
+     * @param ec Error code populated on failure.
+     * @return True if received successfully and signature matches.
+     */
     static bool receiveMessage(asio::ip::tcp::socket& socket, TcpHeader& header, std::vector<uint8_t>& payload, asio::error_code& ec) {
         asio::read(socket, asio::buffer(&header, sizeof(TcpHeader)), ec);
-        if (ec) {
-            return false;
-        }
+        if (ec) return false;
 
         if (header.signature != 0x43594300) {
             ec = asio::error::make_error_code(asio::error::operation_aborted);
@@ -47,10 +60,8 @@ public:
 
         if (header.payloadSize > 0) {
             payload.resize(header.payloadSize);
-            asio::read(socket, asio::buffer(payload.data(), header.payloadSize), ec);
-            if (ec) {
-                return false;
-            }
+            asio::read(socket, asio::buffer(payload), ec);
+            if (ec) return false;
         } else {
             payload.clear();
         }
