@@ -29,7 +29,13 @@ void ChartDelegate::paint(QPainter *p,
     const auto *s = static_cast<const ChartSeries *>(pv.value<const void *>());
 
     p->save();
-    p->setClipRect(option.rect, Qt::IntersectClip);
+    // Расширяем клип по X до полной ширины устройства — фон и сетка рисуются
+    // за пределами данных. По Y оставляем option.rect чтобы не лезть в соседние строки.
+    {
+        const QRect fullR(0, option.rect.top(),
+                          p->device()->width(), option.rect.height());
+        p->setClipRect(fullR, Qt::ReplaceClip);
+    }
     paintBackground(p, option.rect, *s);
     p->restore();
 }

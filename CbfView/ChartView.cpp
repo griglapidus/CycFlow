@@ -11,6 +11,7 @@
 #include <QScrollBar>
 #include <QTimer>
 #include <QMenu>
+#include <QCursor>
 #include <QAction>
 #include <cmath>
 
@@ -38,10 +39,6 @@ ChartView::ChartView(QWidget *parent) : QTableView(parent)
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         );
 
-    m_zoomDebounceTimer = new QTimer(this);
-    m_zoomDebounceTimer->setSingleShot(true);
-    m_zoomDebounceTimer->setInterval(40);
-    connect(m_zoomDebounceTimer, &QTimer::timeout, this, &ChartView::flushZoom);
 
     m_autoFitTimer = new QTimer(this);
     m_autoFitTimer->setSingleShot(true);
@@ -358,14 +355,25 @@ void ChartView::wheelEvent(QWheelEvent *e)
         const int   oldScroll = horizontalScrollBar()->value();
         const float oldPps    = m_chartModel->pixelsPerSample();
         const float newPps    = qBound(0.01f, oldPps * factor, 200.f);
+        const int dataX     = mouseX + oldScroll;
+        const int newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
+        // Атомарное обновление: pps + ширина колонки + скролл в одном кадре.
+        // Без дебаунса — иначе между setPpsQuiet и resizeSection Qt успевает
+        // нарисовать промежуточный кадр со старой колонкой и новым pps.
         m_chartModel->setPpsQuiet(newPps);
-        const int dataX    = mouseX + oldScroll;
-        const int newScroll= qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
-        m_pendingPps    = newPps;
-        m_pendingScroll = newScroll;
-        m_zoomDebounceTimer->start();
+        horizontalHeader()->resizeSection(0,
+                                          qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps)));
+        horizontalScrollBar()->setValue(newScroll);
+        m_pendingOldSamples = m_chartModel->maxSampleCount();
+        m_pendingNewSamples = m_chartModel->maxSampleCount();
         viewport()->update();
         emitVisibleSamplesIfChanged();
+        // Обновляем курсор по фактической позиции мыши —
+        // скролл мог сдвинуться и старый sample больше не соответствует указателю.
+        {
+            const int mx = viewport()->mapFromGlobal(QCursor::pos()).x();
+            m_chartModel->setCursorSample(viewXToSample(mx));
+        }
         e->accept();
         return;
     }
@@ -500,22 +508,6 @@ void ChartView::flushPendingAppend()
     if (m_autoFitY) m_autoFitTimer->start();
 }
 
-void ChartView::flushZoom()
-{
-    if (!m_chartModel || m_pendingPps <= 0.f) return;
-    const int newColWidth = qRound(m_chartModel->maxSampleCount()
-                                   * static_cast<double>(m_pendingPps));
-    horizontalHeader()->resizeSection(0, newColWidth);
-    if (m_pendingScroll >= 0) {
-        horizontalScrollBar()->setValue(m_pendingScroll);
-        m_pendingScroll = -1;
-    }
-    m_pendingOldSamples = m_chartModel->maxSampleCount();
-    m_pendingNewSamples = m_chartModel->maxSampleCount();
-    m_pendingPps        = 0.f;
-    viewport()->update();
-    emitVisibleSamplesIfChanged();
-}
 
 // ─── Операции над выделением ─────────────────────────────────────────────────
 

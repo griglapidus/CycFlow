@@ -48,7 +48,6 @@ private slots:
     void onCursorMoved(int sample);
     void onDataAppended(const QString &name, int row, int newTotalSamples);
     void flushPendingAppend();
-    void flushZoom();
     void doAutoFitY();
 
 private:
@@ -70,10 +69,6 @@ private:
     bool m_appendFlushPending = false;
     int  m_pendingOldSamples  = 0;
     int  m_pendingNewSamples  = 0;
-
-    QTimer *m_zoomDebounceTimer = nullptr;
-    float   m_pendingPps        = 0.f;
-    int     m_pendingScroll     = -1;
 
     bool    m_dragging        = false;
     int     m_dragStartY      = 0;
