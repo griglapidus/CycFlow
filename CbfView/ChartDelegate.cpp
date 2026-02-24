@@ -4,6 +4,12 @@
 #include <QFontMetrics>
 #include <cmath>
 
+static const QColor kBg          = QColor(10,  13,  20);
+static const QColor kDivider     = QColor(38,  46,  64);
+static const QColor kGridMajor   = QColor(38,  50,  72);
+static const QColor kGridLabel   = QColor(60,  80, 110);
+static const QColor kCursorColor = QColor(255, 220, 80, 200);
+
 ChartDelegate::ChartDelegate(ChartModel *model, QObject *parent)
     : QStyledItemDelegate(parent), m_model(model) {}
 
@@ -12,178 +18,178 @@ QSize ChartDelegate::sizeHint(const QStyleOptionViewItem &, const QModelIndex &)
     return {m_model->chartPixelWidth(), m_model->rowHeight()};
 }
 
-void ChartDelegate::paint(QPainter *painter,
+// ─── paint(): только фон + сетка ─────────────────────────────────────────────
+
+void ChartDelegate::paint(QPainter *p,
                           const QStyleOptionViewItem &option,
                           const QModelIndex &index) const
 {
-    painter->save();
-    painter->setClipRect(option.rect, Qt::IntersectClip);
-
     const auto pv = index.data(ChartModel::SeriesPointerRole);
-    if (!pv.isValid()) { painter->restore(); return; }
-    const auto *s  = static_cast<const ChartSeries *>(pv.value<const void *>());
-    const int   cursor = index.data(ChartModel::CursorSampleRole).toInt();
-    const float pps    = index.data(ChartModel::PpsRole).toFloat();
+    if (!pv.isValid()) return;
+    const auto *s = static_cast<const ChartSeries *>(pv.value<const void *>());
 
-    paintChart(painter, option.rect, *s, cursor, pps);
-    painter->restore();
+    p->save();
+    p->setClipRect(option.rect, Qt::IntersectClip);
+    paintBackground(p, option.rect, *s);
+    p->restore();
 }
 
-void ChartDelegate::paintChart(QPainter *p, const QRect &r,
-                               const ChartSeries &s, int cursor, float pps) const
-{
-    static const QColor bgColor     = QColor(10, 13, 20);
-    static const QColor cursorColor = QColor(255, 220, 80, 200);
-    static const QColor gridMajor   = QColor(38,  50,  72);
-    static const QColor gridLabel   = QColor(60,  80, 110);
+// ─── Первый проход: фон, сетка, подписи ──────────────────────────────────────
 
+void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
+                                    const ChartSeries &s) const
+{
+    // clipR — реально перерисовываемая часть ячейки по X (dirty region)
     const QRect clipR = p->clipBoundingRect().toAlignedRect().intersected(r);
     if (clipR.isEmpty()) return;
 
-    p->fillRect(clipR, bgColor);
-
-    p->setPen(QPen(QColor(38, 46, 64), 1));
-    p->drawLine(clipR.left(), r.bottom(), clipR.right(), r.bottom());
-
-    const int dataSize = sampleCount(s.data);
+    // Фон и линии рисуем на всю ширину viewport, а не только до конца данных.
+    // Это важно когда chartPixelWidth() < ширины окна.
+    const int fullRight = p->device()->width() - 1;
+    const QRect fullClip(clipR.left(), r.top(), fullRight - clipR.left() + 1, r.height());
+    p->fillRect(fullClip, kBg);
+    p->setPen(QPen(kDivider, 1));
+    p->drawLine(clipR.left(), r.bottom(), fullRight, r.bottom());
 
     const double loD = boundsToDouble(s.minVal);
     const double hiD = boundsToDouble(s.maxVal);
+    if (loD >= hiD || !std::isfinite(loD) || !std::isfinite(hiD)) return;
 
-    const int    pad     = 4;
-    const int    chartH  = r.height() - pad * 2;
+    const int    chartH  = r.height() - 8;
+    if (chartH <= 0) return;
     const double centerY = r.top() + r.height() * 0.5;
-    const float  yScale  = s.yScale;
-    const int    yOffset = s.yOffset;
+    const double denom   = chartH * static_cast<double>(s.yScale);
+    const double span    = hiD - loD;
 
-    if (loD <= hiD && chartH > 0 && !qFuzzyCompare(loD, hiD)) {
-        const double span   = hiD - loD;
-        const double denom  = chartH * yScale;
+    // Видимый диапазон значений по краям ячейки
+    auto valAtY = [&](double y) {
+        return loD + (0.5 - (y - centerY - s.yOffset) / denom) * span;
+    };
+    const double visHi = valAtY(r.top());
+    const double visLo = valAtY(r.bottom());
+    if (visHi <= visLo) return;
 
-        auto valAtY = [&](double y) -> double {
-            const double ratio = 0.5 - (y - centerY - yOffset) / denom;
-            return loD + ratio * span;
-        };
+    const double rawStep = (visHi - visLo) / 5.0;
+    if (rawStep <= 0 || !std::isfinite(rawStep)) return;
+    const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
+    double step = mag;
+    if      (rawStep / mag >= 5.0) step = 5.0 * mag;
+    else if (rawStep / mag >= 2.0) step = 2.0 * mag;
 
-        const double visHi  = valAtY(r.top());
-        const double visLo  = valAtY(r.bottom());
+    QFont lf("Consolas", 9);
+    p->setFont(lf);
+    const QFontMetrics fm(lf);
+    const int labelH = fm.height();
+    int       prevLy = INT_MIN;
 
-        if (visHi > visLo) {
-            const double visRange = visHi - visLo;
+    for (double v = std::ceil(visLo / step) * step; v <= visHi + step * 0.5; v += step) {
+        const double yLine = centerY + (0.5 - (v - loD) / span) * denom + s.yOffset;
+        if (yLine < r.top() - 0.5 || yLine > r.bottom() + 0.5) continue;
 
-            const double rawStep = visRange / 5.0;
-            const double mag     = std::pow(10.0, std::floor(std::log10(rawStep)));
-            double step = mag;
-            if      (rawStep / mag >= 5.0) step = 5.0 * mag;
-            else if (rawStep / mag >= 2.0) step = 2.0 * mag;
+        p->setPen(QPen(kGridMajor, 1));
+        p->drawLine(QPointF(clipR.left(), yLine), QPointF(fullRight, yLine));
 
-            if (step > 0) {
-                const double firstLine = std::ceil(visLo / step) * step;
+        // Подпись у левого края ВИДИМОЙ области — видна при любом scroll
+        const int yI = static_cast<int>(yLine);
+        int ly = yI - 3;
+        if (ly - fm.ascent() < r.top() + 2) ly = yI + fm.ascent() + 2;
+        if (ly - fm.ascent() > r.bottom()) continue;
+        if (prevLy != INT_MIN && std::abs(ly - prevLy) < labelH + 2) continue;
+        prevLy = ly;
 
-                QFont labelFont("Consolas", 7);
-                p->setFont(labelFont);
-                const QFontMetrics fm(labelFont);
+        QString label;
+        if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
+            label = QString::number(v, 'e', 2);
+        else
+            label = QString::number(v, 'g', 4);
 
-                bool labelDrawn = false;
-
-                for (double v = firstLine; v <= visHi + step * 0.5; v += step) {
-                    const double ratio = (span > 0) ? (v - loD) / span : 0.5;
-                    const double yLine = centerY + (0.5 - ratio) * denom + yOffset;
-
-                    if (yLine < r.top() - 0.5 || yLine > r.bottom() + 0.5) continue;
-                    if (yLine < clipR.top() || yLine > clipR.bottom()) continue;
-
-                    p->setPen(QPen(gridMajor, 1));
-                    p->drawLine(QPointF(clipR.left(), yLine), QPointF(clipR.right(), yLine));
-
-                    if (!labelDrawn || std::fmod(v, step * 5) < step * 0.5) {
-                        QString label;
-                        if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0))
-                            label = QString::number(v, 'e', 2);
-                        else
-                            label = QString::number(v, 'g', 4);
-
-                        const int lx = clipR.left() + 3;
-                        const int ly = static_cast<int>(yLine) - 2;
-                        if (ly - fm.ascent() >= r.top() && ly <= r.bottom()) {
-                            p->setPen(gridLabel);
-                            p->drawText(lx, ly, label);
-                        }
-                        labelDrawn = true;
-                    }
-                }
-            }
-        }
+        p->setPen(kGridLabel);
+        p->drawText(3, ly, label);
+        // Дублируем у правого края viewport.
+        // p->device()->width() — ширина viewport в тех же координатах что x=3.
+        const int labelW = fm.horizontalAdvance(label);
+        const int rLabelX = p->device()->width() - labelW - 3;
+        if (rLabelX > labelW + 10)   // не рисуем если перекрывает левый лейбл
+            p->drawText(rLabelX, ly, label);
     }
+}
 
+// ─── Второй проход: линии данных, точки, курсор ───────────────────────────────
+//
+// Вызывается из ChartView::paintEvent (новый QPainter на viewport) после того
+// как все ячейки нарисовали фон. Painter уже переведён в content-координаты.
+// clipXLeft/clipXRight — видимый X в content-координатах.
+// Y не ограничен — линии могут выходить за пределы своей строки.
+
+void ChartDelegate::paintData(QPainter *p, const QRect &cell,
+                              const ChartSeries &s, int cursor, float pps,
+                              int clipXLeft, int clipXRight) const
+{
+    const int dataSize = sampleCount(s.data);
     if (dataSize == 0) return;
+
+    const double loD = boundsToDouble(s.minVal);
+    const double hiD = boundsToDouble(s.maxVal);
     if (loD > hiD) return;
 
+    const int    chartH  = cell.height() - 8;
+    if (chartH <= 0) return;
+    const double centerY = cell.top() + cell.height() * 0.5;
+    const double denom   = chartH * static_cast<double>(s.yScale);
 
-    const float dataLeft  = static_cast<float>(clipR.left()  - r.left());
-    const float dataRight = static_cast<float>(clipR.right() - r.left());
+    // Пересечение с ячейкой по X (не рисуем левее начала данных)
+    const int cLeft  = qMax(clipXLeft,  cell.left());
+    const int cRight = qMin(clipXRight, cell.right());
+    if (cLeft > cRight) return;
 
-    const int firstSample = qMax(0, static_cast<int>(dataLeft / pps));
-    const int lastSample  = qMin(dataSize - 1, static_cast<int>((dataRight + pps) / pps));
+    // Индексы семплов по видимому X
+    const float dataLeft  = static_cast<float>(cLeft  - cell.left());
+    const float dataRight = static_cast<float>(cRight - cell.left());
+    const int first = qMax(0, static_cast<int>(dataLeft / pps));
+    const int last  = qMin(dataSize - 1, static_cast<int>((dataRight + pps) / pps));
+    if (first > last) return;
 
-    if (firstSample > lastSample) return;
-
-    const double denom = static_cast<double>(chartH) * yScale;
-
-    auto sampleToPoint = [&](int i) -> QPointF {
+    auto toPoint = [&](int i) -> QPointF {
         const double ratio = sampleRatio(s.data, i, s.minVal, s.maxVal);
-        return {
-            r.left() + i * static_cast<double>(pps),
-            centerY + (0.5 - ratio) * denom + yOffset
-        };
+        return { cell.left() + i * static_cast<double>(pps),
+                centerY + (0.5 - ratio) * denom + s.yOffset };
     };
 
-    p->setClipRect(r, Qt::IntersectClip);
-
     p->setRenderHint(QPainter::Antialiasing, true);
-    QPen linePen(s.color, 1.0f);
-    linePen.setCosmetic(true);
-    p->setPen(linePen);
+    QPen lp(s.color, 1.0f); lp.setCosmetic(true);
+    p->setPen(lp);
 
     if (pps >= 1.0f) {
         QPolygonF poly;
-        poly.reserve(lastSample - firstSample + 1);
-        for (int i = firstSample; i <= lastSample; ++i)
-            poly.append(sampleToPoint(i));
+        poly.reserve(last - first + 1);
+        for (int i = first; i <= last; ++i) poly.append(toPoint(i));
         p->drawPolyline(poly);
     } else {
-        const int visPixels = clipR.width() + 2;
-        QVector<QLineF> lines;
-        lines.reserve(visPixels);
+        const int visPixels = cRight - cLeft + 2;
+        QVector<QLineF> lines; lines.reserve(visPixels);
 
-        int    prevPx    = -1;
-        double pixMin    = 1.0, pixMax = 0.0, lastRatio = 0.0;
-        bool   pixUsed   = false;
+        int    prevPx = -1;
+        double pMin = 1.0, pMax = 0.0, lastRatio = 0.0;
+        bool   used  = false;
         const int iDataLeft = static_cast<int>(dataLeft);
 
         auto flush = [&](int px) {
-            if (!pixUsed) return;
-            const double xV   = clipR.left() + px + 0.5;
-            const double yHi  = centerY + (0.5 - pixMax) * denom + yOffset;
-            const double yLo  = centerY + (0.5 - pixMin) * denom + yOffset;
-            lines.append(QLineF(xV, yHi, xV, yLo));
+            if (!used) return;
+            lines.append(QLineF(
+                cLeft + px + 0.5, centerY + (0.5 - pMax) * denom + s.yOffset,
+                cLeft + px + 0.5, centerY + (0.5 - pMin) * denom + s.yOffset));
         };
-
-        for (int i = firstSample; i <= lastSample; ++i) {
+        for (int i = first; i <= last; ++i) {
             const int    px    = qBound(0, static_cast<int>(i * pps) - iDataLeft, visPixels);
             const double ratio = sampleRatio(s.data, i, s.minVal, s.maxVal);
             if (px != prevPx) {
                 flush(prevPx);
-                pixMin = pixMax = ratio;
-                if (pixUsed) {
-                    if (lastRatio < pixMin) pixMin = lastRatio;
-                    if (lastRatio > pixMax) pixMax = lastRatio;
-                }
-                prevPx  = px;
-                pixUsed = true;
+                pMin = pMax = ratio;
+                if (used) { if (lastRatio < pMin) pMin = lastRatio; if (lastRatio > pMax) pMax = lastRatio; }
+                prevPx = px; used = true;
             } else {
-                if (ratio < pixMin) pixMin = ratio;
-                if (ratio > pixMax) pixMax = ratio;
+                if (ratio < pMin) pMin = ratio;
+                if (ratio > pMax) pMax = ratio;
             }
             lastRatio = ratio;
         }
@@ -192,27 +198,22 @@ void ChartDelegate::paintChart(QPainter *p, const QRect &r,
     }
 
     if (pps >= 4.0f) {
-        const float dotR = qMin(pps * 0.25f, 4.0f);
-        QColor dotColor  = s.color.lighter(130);
-        dotColor.setAlpha(210);
-        p->setPen(Qt::NoPen);
-        p->setBrush(dotColor);
-        for (int i = firstSample; i <= lastSample; ++i)
-            p->drawEllipse(sampleToPoint(i), dotR, dotR);
+        const float dr = qMin(pps * 0.25f, 4.0f);
+        QColor dc = s.color.lighter(130); dc.setAlpha(210);
+        p->setPen(Qt::NoPen); p->setBrush(dc);
+        for (int i = first; i <= last; ++i) p->drawEllipse(toPoint(i), dr, dr);
     }
 
     if (cursor >= 0 && cursor < dataSize) {
-        const float xView = r.left() + cursor * static_cast<float>(pps);
-        if (xView >= clipR.left() && xView <= clipR.right()) {
-            p->setPen(QPen(cursorColor, 1));
-            p->drawLine(QPointF(xView, r.top()), QPointF(xView, r.bottom()));
-
-            const float dotR       = (pps >= 4.0f) ? qMin(pps * 0.25f, 4.0f) : 0.f;
-            const float cursorDotR = qMax(dotR + 1.f, 3.5f);
-            p->setRenderHint(QPainter::Antialiasing, true);
+        const double cx = cell.left() + cursor * static_cast<double>(pps);
+        if (cx >= cLeft && cx <= cRight) {
+            p->setPen(QPen(kCursorColor, 1));
+            p->drawLine(QPointF(cx, cell.top()), QPointF(cx, cell.bottom()));
+            const float dr  = (pps >= 4.0f) ? qMin(pps * 0.25f, 4.0f) : 0.f;
+            const float cdr = qMax(dr + 1.f, 3.5f);
             p->setPen(QPen(QColor(20, 24, 35), 1.5f));
-            p->setBrush(cursorColor);
-            p->drawEllipse(sampleToPoint(cursor), cursorDotR, cursorDotR);
+            p->setBrush(kCursorColor);
+            p->drawEllipse(toPoint(cursor), cdr, cdr);
         }
     }
 }

@@ -5,6 +5,7 @@
 #include "ChartModel.h"
 
 #include <QTableView>
+#include <QSet>
 #include <QTimer>
 
 class ChartView : public QTableView
@@ -27,7 +28,13 @@ public slots:
     void toggleAutoFitY();
     void setAutoFitY(bool on);
 
+    // Операции над выделением из ChartHeaderView
+    void syncScale    (int sourceRow, const QSet<int> &rows);
+    void overlayOnto  (int sourceRow, const QSet<int> &rows);
+    void resetSelected(const QSet<int> &rows);
+
 protected:
+    void paintEvent       (QPaintEvent    *e) override;   // ← двухпроходная отрисовка
     void mouseMoveEvent   (QMouseEvent *e) override;
     void mousePressEvent  (QMouseEvent *e) override;
     void mouseReleaseEvent(QMouseEvent *e) override;

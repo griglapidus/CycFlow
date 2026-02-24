@@ -2,9 +2,7 @@
 #define CHARTDELEGATE_H
 
 #include "ChartModel.h"
-
 #include <QStyledItemDelegate>
-#include <cfloat>
 
 class ChartDelegate : public QStyledItemDelegate
 {
@@ -12,16 +10,18 @@ class ChartDelegate : public QStyledItemDelegate
 public:
     explicit ChartDelegate(ChartModel *model, QObject *parent = nullptr);
 
-    void  paint   (QPainter *painter,
-               const QStyleOptionViewItem &option,
+    void  paint   (QPainter *painter, const QStyleOptionViewItem &option,
                const QModelIndex &index) const override;
-
     QSize sizeHint(const QStyleOptionViewItem &option,
                    const QModelIndex &index) const override;
 
+    void paintData(QPainter *p, const QRect &cell,
+                   const ChartSeries &s, int cursor, float pps,
+                   int clipXLeft, int clipXRight) const;
+
 private:
-    void paintChart(QPainter *p, const QRect &r,
-                    const ChartSeries &s, int cursor, float pps) const;
+    // Первый проход: фон + сетка + подписи, строго в пределах ячейки.
+    void paintBackground(QPainter *p, const QRect &r, const ChartSeries &s) const;
 
     ChartModel *m_model;
 };

@@ -18,6 +18,7 @@ add_executable(ChartWidgetDemo
     ChartDelegate.h ChartDelegate.cpp
     ChartHeaderView.h ChartHeaderView.cpp
     ChartView.h ChartView.cpp
+    ChartHeaderView.h ChartHeaderView.cpp
 )
 
 target_link_libraries(ChartWidgetDemo

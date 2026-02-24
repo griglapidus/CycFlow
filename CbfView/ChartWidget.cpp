@@ -14,6 +14,14 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_view->setChartModel(m_model);
     m_headerView->syncVerticalScroll(m_view);
 
+    // Операции из контекстного меню заголовков → слоты ChartView
+    connect(m_headerView, &ChartHeaderView::syncScaleRequested,
+            m_view,       &ChartView::syncScale);
+    connect(m_headerView, &ChartHeaderView::overlayRequested,
+            m_view,       &ChartView::overlayOnto);
+    connect(m_headerView, &ChartHeaderView::resetSelectedRequested,
+            m_view,       &ChartView::resetSelected);
+
     const QString tbStyle =
         "QToolBar { background:#0c1018; border-bottom:1px solid #1e2538;"
         "           spacing:2px; padding:2px 6px; }"

@@ -5,6 +5,7 @@
 
 #include <QWidget>
 #include <QAbstractScrollArea>
+#include <QSet>
 
 class ChartHeaderView : public QWidget
 {
@@ -14,11 +15,21 @@ public:
 
     void syncVerticalScroll(QAbstractScrollArea *chartView);
 
+    // Текущее выделение
+    QSet<int> selectedRows() const { return m_selectedRows; }
+
+signals:
+    // Операции над выделением — ChartView подключается и выполняет
+    void syncScaleRequested  (int sourceRow, QSet<int> rows);
+    void overlayRequested    (int sourceRow, QSet<int> rows);
+    void resetSelectedRequested(QSet<int> rows);
+
 protected:
     void paintEvent        (QPaintEvent   *) override;
     void mouseMoveEvent    (QMouseEvent   *) override;
     void mousePressEvent   (QMouseEvent   *) override;
     void mouseReleaseEvent (QMouseEvent   *) override;
+    void contextMenuEvent  (QContextMenuEvent *) override;
     void leaveEvent        (QEvent        *) override;
 
 private slots:
@@ -28,19 +39,25 @@ private slots:
 
 private:
     void paintRow(QPainter *p, const QRect &r,
-                  const ChartSeries &s, int cursor) const;
+                  const ChartSeries &s, int cursor, bool selected) const;
+
     static constexpr int kResizeZone = 5;
     int rowAtResizeHandle(int y) const;
-
+    int rowAt(int y) const;        // строка под указателем (не resize-зона)
     int rowTop(int row) const;
 
     ChartModel *m_model;
     int         m_scrollOffset = 0;
 
-    bool m_resizing        = false;
-    int  m_resizeRow       = -1;
-    int  m_resizePressY    = 0;
-    int  m_resizeStartH    = 0;
+    // Resize drag
+    bool m_resizing     = false;
+    int  m_resizeRow    = -1;
+    int  m_resizePressY = 0;
+    int  m_resizeStartH = 0;
+
+    // Selection
+    QSet<int> m_selectedRows;
+    int       m_lastClickedRow = -1;   // для Shift-клика (на будущее)
 };
 
 #endif // CHARTHEADERVIEW_H
