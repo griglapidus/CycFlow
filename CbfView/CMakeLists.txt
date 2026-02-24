@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
-add_executable(CbfView
+add_executable(CbfView WIN32
     main.cpp
     ChartWidget.h
     ChartWidget.cpp
