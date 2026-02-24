@@ -24,7 +24,6 @@ signals:
     void visibleSamplesChanged(int count, double pps);
 
 public slots:
-    void fitYToVisible();
     void toggleAutoFitY();
     void setAutoFitY(bool on);
 

@@ -130,34 +130,6 @@ ChartView::VisibleRange ChartView::visibleRangeForRow(int row) const
     return {lo, hi, !qFuzzyCompare(lo, hi)};
 }
 
-void ChartView::fitYToVisible()
-{
-    setAutoFitY(false);
-    if (!m_chartModel) return;
-
-    for (int r = 0; r < m_chartModel->rowCount(); ++r) {
-        const ChartSeries *s = m_chartModel->series(r);
-        if (!s) continue;
-
-        const auto vr = visibleRangeForRow(r);
-        if (!vr.valid) continue;
-
-        const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
-        const double visibleRange = vr.hi - vr.lo;
-        if (globalRange <= 0 || visibleRange <= 0) continue;
-
-        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange * 0.8), 50.f);
-
-        const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
-        const double midVis    = (vr.lo + vr.hi) * 0.5;
-        const int rowH  = s->rowHeight - 4*2;
-        const int newOffset = static_cast<int>((midGlobal - midVis) / globalRange * rowH * newScale);
-
-        m_chartModel->setSeriesYScale(s->name, newScale);
-        m_chartModel->setSeriesYOffset(s->name, newOffset);
-    }
-}
-
 void ChartView::toggleAutoFitY() { setAutoFitY(!m_autoFitY); }
 
 void ChartView::setAutoFitY(bool on)
@@ -178,7 +150,7 @@ void ChartView::doAutoFitY()
         const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
         const double visibleRange = vr.hi - vr.lo;
         if (globalRange <= 0 || visibleRange <= 0) continue;
-        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange * 0.8), 50.f);
+        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange), 50.f);
         const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
         const double midVis    = (vr.lo + vr.hi) * 0.5;
         const int rowH  = s->rowHeight - 8;
@@ -341,11 +313,6 @@ void ChartView::contextMenuEvent(QContextMenuEvent *e)
     actAutoFit->setChecked(m_autoFitY);
     connect(actAutoFit, &QAction::triggered, this, &ChartView::toggleAutoFitY);
 
-    QAction *actOneFit = menu.addAction(u8"Подогнать Y под видимый фрагмент");
-    connect(actOneFit, &QAction::triggered, this, &ChartView::fitYToVisible);
-
-    menu.addSeparator();
-
     const int row = viewYToRow(e->pos().y());
     const ChartSeries *s = (row >= 0) ? m_chartModel->series(row) : nullptr;
     if (s) {
@@ -454,13 +421,10 @@ void ChartView::keyPressEvent(QKeyEvent *e)
     case Qt::Key_Down:
         m_chartModel->setRowHeight(static_cast<int>(m_chartModel->rowHeight() / 1.2f));
         break;
-    case Qt::Key_F:
-        fitYToVisible();
-        break;
     case Qt::Key_A:
         toggleAutoFitY();
         break;
-    case Qt::Key_Escape:
+    case Qt::Key_F:
         m_chartModel->resetAllDisplayParams();
         setAutoFitY(false);
         break;
