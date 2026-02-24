@@ -1,18 +1,21 @@
 #ifndef DATAGENERATOR_H
 #define DATAGENERATOR_H
 
-#include <QVector>
+#include "ChartDefs.h"
+
 #include <QObject>
+#include <QVector>
+#include <QString>
 
 class DataGenerator : public QObject
 {
     Q_OBJECT
 public:
     struct SeriesConfig {
-        int   index;
-        float freq;
-        float amp;
-        float bias;
+        QString name;
+        float   freq;
+        float   amp;
+        float   bias;
     };
 
     explicit DataGenerator(QObject *parent = nullptr);
@@ -25,7 +28,7 @@ public slots:
     void stop();
 
 signals:
-    void batchReady(int seriesIndex, QVector<float> samples);
+    void batchReady(QList<SeriesBatch> batch);
 
 private:
     QVector<SeriesConfig> m_configs;

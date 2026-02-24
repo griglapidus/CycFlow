@@ -2,6 +2,7 @@
 
 #include <QRandomGenerator>
 #include <QTimer>
+#include <cmath>
 
 DataGenerator::DataGenerator(QObject *parent) : QObject(parent) {}
 
@@ -20,17 +21,25 @@ void DataGenerator::start()
 
     connect(timer, &QTimer::timeout, this, [this]() {
         if (!m_running) return;
+
+        QList<SeriesBatch> batch;
+        batch.reserve(m_configs.size());
+
         for (const auto &cfg : qAsConst(m_configs)) {
-            QVector<float> batch(m_batchSize);
-            for (int i = 0; i < m_batchSize; ++i)
-                batch[i] = cfg.bias
-                           + cfg.amp * std::sin((m_tick + i) * cfg.freq)
-                           + 0.05f * static_cast<float>(
-                                 QRandomGenerator::global()->generateDouble());
-            emit batchReady(cfg.index, batch);
+            QVector<float> data(m_batchSize);
+            for (int i = 0; i < m_batchSize; ++i) {
+                data[i] = cfg.bias
+                          + cfg.amp * std::sin((m_tick + i) * cfg.freq)
+                          + 0.05f * static_cast<float>(
+                                QRandomGenerator::global()->generateDouble());
+            }
+            batch.append(SeriesBatch{ cfg.name, std::move(data) });
         }
+
         m_tick += m_batchSize;
+        emit batchReady(std::move(batch));
     });
+
     timer->start();
 }
 

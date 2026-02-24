@@ -7,6 +7,7 @@
 #include <QWidget>
 
 class QLabel;
+class QAction;
 
 class ChartWidget : public QWidget
 {
@@ -22,8 +23,9 @@ private slots:
     void onVisibleSamplesChanged(int count, double pps);
 
 private:
-    ChartModel      *m_model      = nullptr;
-    ChartView       *m_view       = nullptr;
-    ChartHeaderView *m_headerView = nullptr;
+    ChartModel      *m_model       = nullptr;
+    ChartView       *m_view        = nullptr;
+    ChartHeaderView *m_headerView  = nullptr;
     QLabel          *m_statusLabel = nullptr;
+    QAction         *m_actAutoFit  = nullptr;
 };

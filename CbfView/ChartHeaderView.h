@@ -15,18 +15,32 @@ public:
     void syncVerticalScroll(QAbstractScrollArea *chartView);
 
 protected:
-    void paintEvent(QPaintEvent *e) override;
+    void paintEvent        (QPaintEvent   *) override;
+    void mouseMoveEvent    (QMouseEvent   *) override;
+    void mousePressEvent   (QMouseEvent   *) override;
+    void mouseReleaseEvent (QMouseEvent   *) override;
+    void leaveEvent        (QEvent        *) override;
 
 private slots:
-    void onCursorMoved(int sample);
-    void onVerticalScroll(int value);
+    void onCursorMoved    (int sample);
+    void onVerticalScroll (int value);
+    void onLayoutChanged  ();
 
 private:
     void paintRow(QPainter *p, const QRect &r,
                   const ChartSeries &s, int cursor) const;
+    static constexpr int kResizeZone = 5;
+    int rowAtResizeHandle(int y) const;
+
+    int rowTop(int row) const;
 
     ChartModel *m_model;
-    int         m_scrollOffset = 0;   // вертикальный скролл в пикселях
+    int         m_scrollOffset = 0;
+
+    bool m_resizing        = false;
+    int  m_resizeRow       = -1;
+    int  m_resizePressY    = 0;
+    int  m_resizeStartH    = 0;
 };
 
 #endif // CHARTHEADERVIEW_H
