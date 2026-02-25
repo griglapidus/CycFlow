@@ -10,10 +10,9 @@
 namespace cyc {
 
 TcpDataReceiver::TcpDataReceiver(size_t bufferCapacity, size_t writerBatchSize)
-    : RecordProducer(bufferCapacity)
+    : RecordProducer(bufferCapacity, writerBatchSize)
     , m_socket(m_ioContext)
     , m_connected(false)
-    , m_writerBatchSize(writerBatchSize)
 {
 }
 

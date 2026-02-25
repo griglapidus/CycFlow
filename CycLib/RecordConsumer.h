@@ -18,7 +18,7 @@ namespace cyc {
  */
 class CYCLIB_EXPORT RecordConsumer {
 public:
-    RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
+    RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 0);
     virtual ~RecordConsumer();
 
     /**

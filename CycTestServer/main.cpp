@@ -30,7 +30,6 @@ int main() {
         RecRule rule;
         rule.init(attrs);
 
-        const auto& ruleAttrs = rule.getAttributes();
         int idTS = PReg::getID("TimeStamp");
         int idCounter = PReg::getID("Counter");
         int idVoltage = PReg::getID("Voltage");
@@ -39,8 +38,8 @@ int main() {
         int idPres    = PReg::getID("Pressure");
 
         // 2. Create Ring Buffer and Writer
-        auto buffer = std::make_shared<RecBuffer>(rule, 100000);
-        RecordWriter writer(buffer, 200);
+        auto buffer = std::make_shared<RecBuffer>(rule, 10000);
+        RecordWriter writer(buffer, 2000);
 
         // 3. Start TCP Server
         uint16_t port = 5000;
