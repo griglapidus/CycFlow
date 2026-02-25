@@ -31,14 +31,25 @@ if(MSVC)
 endif()
 
 # --- Output Directory Configuration ---
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/lib)
+# Set output directories for each standard build configuration
+foreach(CONFIG IN ITEMS Debug Release RelWithDebInfo MinSizeRel)
+    string(TOUPPER ${CONFIG} CONFIG_UPPER)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/bin/${CONFIG}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/lib/${CONFIG}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/lib/${CONFIG}")
+endforeach()
+
+# Fallback base directories (useful for some single-config generators)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/lib")
+
 set(HEADER_DEST_DIR "${CMAKE_SOURCE_DIR}/build/include")
 # --------------------------------------
 
 add_subdirectory(CycLib)
 add_subdirectory(CbfView)
+add_subdirectory(CycBufReceiver)
 
 option(BUILD_TESTING "Build tests" OFF)
 
@@ -46,5 +57,6 @@ if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
     add_subdirectory(ChartViewTest)
+    add_subdirectory(CycTestServer)
 endif()
 
