@@ -59,6 +59,7 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_actAutoFit->setChecked(false);
     m_actAutoFit->setToolTip(u8"Авто-подстройка Y по видимому фрагменту");
     connect(m_actAutoFit, &QAction::triggered, m_view, &ChartView::setAutoFitY);
+    connect(m_view, &ChartView::autoFitYChanged, m_actAutoFit, &QAction::setChecked);
     tb->addAction(m_actAutoFit);
 
     tb->addWidget(new QLabel("|"));

@@ -5,7 +5,7 @@
 #include <QString>
 #include <QVector>
 #include <QColor>
-#include "ChartDefs.h"
+#include "../ChartWidget/ChartDefs.h"
 #include "Core/Common.h"
 
 struct CbfSeriesConfig {

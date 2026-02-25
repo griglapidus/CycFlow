@@ -3,7 +3,7 @@
 
 #include <QMainWindow>
 #include <QString>
-#include "ChartWidget.h"
+#include "../ChartWidget/ChartWidget.h"
 
 class MainWindow : public QMainWindow
 {

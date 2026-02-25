@@ -3,7 +3,7 @@
 #include <QCommandLineOption>
 
 #include "MainWindow.h"
-#include "ChartDefs.h"
+#include "../ChartWidget/ChartDefs.h"
 #include "CbfReader.h"
 
 int main(int argc, char *argv[])

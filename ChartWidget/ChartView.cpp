@@ -9,7 +9,6 @@
 #include <QContextMenuEvent>
 #include <QPaintEvent>
 #include <QScrollBar>
-#include <QTimer>
 #include <QMenu>
 #include <QCursor>
 #include <QAction>
@@ -40,10 +39,7 @@ ChartView::ChartView(QWidget *parent) : QTableView(parent)
         );
 
 
-    m_autoFitTimer = new QTimer(this);
-    m_autoFitTimer->setSingleShot(true);
-    m_autoFitTimer->setInterval(50);
-    connect(m_autoFitTimer, &QTimer::timeout, this, &ChartView::doAutoFitY);
+
 }
 
 void ChartView::setChartModel(ChartModel *model)
@@ -127,11 +123,48 @@ ChartView::VisibleRange ChartView::visibleRangeForRow(int row) const
     return {lo, hi, !qFuzzyCompare(lo, hi)};
 }
 
-void ChartView::toggleAutoFitY() { setAutoFitY(!m_autoFitY); }
+void ChartView::fitYToVisible()
+{
+    setAutoFitY(false);
+    if (!m_chartModel) return;
+
+    for (int r = 0; r < m_chartModel->rowCount(); ++r) {
+        const ChartSeries *s = m_chartModel->series(r);
+        if (!s) continue;
+
+        const auto vr = visibleRangeForRow(r);
+        if (!vr.valid) continue;
+
+        const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
+        const double visibleRange = vr.hi - vr.lo;
+        if (globalRange <= 0 || visibleRange <= 0) continue;
+
+        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange), 50.f);
+
+        const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
+        const double midVis    = (vr.lo + vr.hi) * 0.5;
+        const int rowH  = s->rowHeight - 8;
+        // yOffset must shift the graph so that midVis lands at the cell center.
+        // Rendering: y(V) = centerY + (0.5 - ratio(V)) * chartH * yScale + yOffset
+        // For y(midVis) == centerY:  yOffset = (ratio(midVis) - 0.5) * chartH * yScale
+        //   ratio(midVis) = (midVis - lo) / range  →  (midVis - midGlobal) / range
+        const int newOffset = static_cast<int>((midVis - midGlobal) / globalRange * rowH * newScale);
+
+        m_chartModel->setSeriesYScale(s->name, newScale);
+        m_chartModel->setSeriesYOffset(s->name, newOffset);
+    }
+}
+
+void ChartView::toggleAutoFitY()
+{
+    setAutoFitY(!m_autoFitY);
+}
 
 void ChartView::setAutoFitY(bool on)
 {
+    if (m_autoFitY == on) return;
     m_autoFitY = on;
+    emit autoFitYChanged(on);
     if (on) doAutoFitY();
 }
 
@@ -151,7 +184,7 @@ void ChartView::doAutoFitY()
         const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
         const double midVis    = (vr.lo + vr.hi) * 0.5;
         const int rowH  = s->rowHeight - 8;
-        const int newOffset = static_cast<int>((midGlobal - midVis) / globalRange * rowH * newScale);
+        const int newOffset = static_cast<int>((midVis - midGlobal) / globalRange * rowH * newScale);
         m_chartModel->setSeriesYScale(s->name, newScale);
         m_chartModel->setSeriesYOffset(s->name, newOffset);
     }
@@ -310,6 +343,9 @@ void ChartView::contextMenuEvent(QContextMenuEvent *e)
     actAutoFit->setChecked(m_autoFitY);
     connect(actAutoFit, &QAction::triggered, this, &ChartView::toggleAutoFitY);
 
+    QAction *actOneFit = menu.addAction(u8"Подогнать Y под видимый фрагмент");
+    connect(actOneFit, &QAction::triggered, this, &ChartView::fitYToVisible);
+
     const int row = viewYToRow(e->pos().y());
     const ChartSeries *s = (row >= 0) ? m_chartModel->series(row) : nullptr;
     if (s) {
@@ -374,6 +410,7 @@ void ChartView::wheelEvent(QWheelEvent *e)
             const int mx = viewport()->mapFromGlobal(QCursor::pos()).x();
             m_chartModel->setCursorSample(viewXToSample(mx));
         }
+        if (m_autoFitY) doAutoFitY();
         e->accept();
         return;
     }
@@ -400,7 +437,7 @@ void ChartView::resizeEvent(QResizeEvent *e)
 {
     QTableView::resizeEvent(e);
     emitVisibleSamplesIfChanged();
-    if (m_autoFitY) m_autoFitTimer->start();
+    if (m_autoFitY) doAutoFitY();
 }
 
 void ChartView::keyPressEvent(QKeyEvent *e)
@@ -429,10 +466,13 @@ void ChartView::keyPressEvent(QKeyEvent *e)
     case Qt::Key_Down:
         m_chartModel->setRowHeight(static_cast<int>(m_chartModel->rowHeight() / 1.2f));
         break;
+    case Qt::Key_F:
+        fitYToVisible();
+        break;
     case Qt::Key_A:
         toggleAutoFitY();
         break;
-    case Qt::Key_F:
+    case Qt::Key_Escape:
         m_chartModel->resetAllDisplayParams();
         setAutoFitY(false);
         break;
@@ -445,7 +485,7 @@ void ChartView::keyPressEvent(QKeyEvent *e)
 void ChartView::onHScrollChanged(int /*value*/)
 {
     emitVisibleSamplesIfChanged();
-    if (m_autoFitY) m_autoFitTimer->start();
+    if (m_autoFitY) doAutoFitY();
 }
 
 int ChartView::visibleSampleCount() const
@@ -505,7 +545,7 @@ void ChartView::flushPendingAppend()
         viewport()->update(QRect(visLeft, 0, visRight - visLeft, vpH));
 
     emitVisibleSamplesIfChanged();
-    if (m_autoFitY) m_autoFitTimer->start();
+    if (m_autoFitY) doAutoFitY();
 }
 
 

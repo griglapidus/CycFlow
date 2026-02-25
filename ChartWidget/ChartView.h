@@ -6,7 +6,6 @@
 
 #include <QTableView>
 #include <QSet>
-#include <QTimer>
 
 class ChartView : public QTableView
 {
@@ -22,8 +21,10 @@ public:
 
 signals:
     void visibleSamplesChanged(int count, double pps);
+    void autoFitYChanged(bool on);
 
 public slots:
+    void fitYToVisible();
     void toggleAutoFitY();
     void setAutoFitY(bool on);
 
@@ -48,9 +49,9 @@ private slots:
     void onCursorMoved(int sample);
     void onDataAppended(const QString &name, int row, int newTotalSamples);
     void flushPendingAppend();
-    void doAutoFitY();
 
 private:
+    void   doAutoFitY();
     int    viewXToSample(int viewX) const;
     int    viewYToRow   (int viewY) const;
     void   repaintCursorStrip(int oldSample, int newSample);
@@ -76,7 +77,6 @@ private:
     QString m_dragSeriesName;
 
     bool    m_autoFitY        = false;
-    QTimer *m_autoFitTimer    = nullptr;
 };
 
 #endif // CHARTVIEW_H
