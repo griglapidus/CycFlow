@@ -4,6 +4,7 @@
 #include "RecordWriter.h"
 #include "Core/PReg.h"
 #include <algorithm>
+#include <cstring>
 
 namespace cyc {
 
@@ -53,11 +54,18 @@ Record RecordWriter::nextRecord() {
     }
 
     uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
+    std::memset(ptr, 0, m_recSize);
     return Record(m_rule, ptr);
 }
 
 void RecordWriter::commitRecord() {
     if (m_currentIdx < m_capacity) {
+        uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
+        Record rec(m_rule, ptr);
+
+        if (rec.getDouble(m_timestampId) == 0.0) {
+            rec.setDouble(m_timestampId, get_current_epoch_time());
+        }
         ++m_currentIdx;
     }
 }
@@ -75,11 +83,22 @@ RecordWriter::RecordBatch RecordWriter::nextBatch(size_t maxRecords, bool wait) 
     size_t count = std::min(maxRecords, available);
 
     uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
+    std::memset(ptr, 0, count * m_recSize);
     return {ptr, count, m_rule, m_recSize};
 }
 
 void RecordWriter::commitBatch(size_t count) {
     if (m_currentIdx + count <= m_capacity) {
+        size_t available = m_capacity - m_currentIdx;
+        if (count > available) count = available;
+
+        for (size_t i = 0; i < count; ++i) {
+            uint8_t* ptr = m_activeBuf->data() + ((m_currentIdx + i) * m_recSize);
+            Record rec(m_rule, ptr);
+            if (rec.getDouble(m_timestampId) == 0.0) {
+                rec.setDouble(m_timestampId, get_current_epoch_time());
+            }
+        }
         m_currentIdx += count;
     } else {
         // Safety fallback in case of incorrect count provided by the user
