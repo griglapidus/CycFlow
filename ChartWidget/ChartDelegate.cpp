@@ -7,7 +7,7 @@
 static const QColor kBg          = QColor(10,  13,  20);
 static const QColor kDivider     = QColor(38,  46,  64);
 static const QColor kGridMajor   = QColor(38,  50,  72);
-static const QColor kGridLabel   = QColor(60,  80, 110);
+static const QColor kGridLabel   = QColor(70,  90, 120);
 static const QColor kCursorColor = QColor(255, 220, 80, 200);
 
 ChartDelegate::ChartDelegate(ChartModel *model, QObject *parent)

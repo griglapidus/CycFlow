@@ -38,12 +38,13 @@ set(HEADER_DEST_DIR "${CMAKE_SOURCE_DIR}/build/include")
 # --------------------------------------
 
 add_subdirectory(CycLib)
+add_subdirectory(CbfView)
 
 option(BUILD_TESTING "Build tests" OFF)
 
 if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
+    add_subdirectory(ChartViewTest)
 endif()
 
-add_subdirectory(CbfView)
