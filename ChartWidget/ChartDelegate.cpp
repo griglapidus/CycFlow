@@ -171,36 +171,80 @@ void ChartDelegate::paintData(QPainter *p, const QRect &cell,
         for (int i = first; i <= last; ++i) poly.append(toPoint(i));
         p->drawPolyline(poly);
     } else {
-        const int visPixels = cRight - cLeft + 2;
-        QVector<QLineF> lines; lines.reserve(visPixels);
+        struct PixelData {
+            int    px        = -1;
+            double enterRatio = 0.0;
+            double exitRatio  = 0.0;
+            double pMin       = 1.0;
+            double pMax       = 0.0;
+            bool   used       = false;
+        };
 
-        int    prevPx = -1;
-        double pMin = 1.0, pMax = 0.0, lastRatio = 0.0;
-        bool   used  = false;
+        const int visPixels = cRight - cLeft + 2;
         const int iDataLeft = static_cast<int>(dataLeft);
 
-        auto flush = [&](int px) {
-            if (!used) return;
-            lines.append(QLineF(
-                cLeft + px + 0.5, centerY + (0.5 - pMax) * denom + s.yOffset,
-                cLeft + px + 0.5, centerY + (0.5 - pMin) * denom + s.yOffset));
+        PixelData prev, cur;
+
+        QPolygonF poly;
+        poly.reserve(visPixels * 2);
+
+        auto emitPixel = [&](const PixelData &pd) {
+            if (!pd.used) return;
+            const double x  = cLeft + pd.px + 0.5;
+            const double yE = centerY + (0.5 - pd.enterRatio) * denom + s.yOffset;
+            const double yX = centerY + (0.5 - pd.exitRatio)  * denom + s.yOffset;
+            const double yN = centerY + (0.5 - pd.pMin)       * denom + s.yOffset;
+            const double yP = centerY + (0.5 - pd.pMax)       * denom + s.yOffset;
+            poly.append(QPointF(x, yP));
+            poly.append(QPointF(x, yN));
+            poly.append(QPointF(x, yX));
+            Q_UNUSED(yE)
         };
+
         for (int i = first; i <= last; ++i) {
             const int    px    = qBound(0, static_cast<int>(i * pps) - iDataLeft, visPixels);
             const double ratio = sampleRatio(s.data, i, s.minVal, s.maxVal);
-            if (px != prevPx) {
-                flush(prevPx);
-                pMin = pMax = ratio;
-                if (used) { if (lastRatio < pMin) pMin = lastRatio; if (lastRatio > pMax) pMax = lastRatio; }
-                prevPx = px; used = true;
+
+            if (px != cur.px) {
+                if (cur.used) {
+                    if (prev.used) {
+                        const double xP = cLeft + prev.px + 0.5;
+                        const double xC = cLeft + px + 0.5;
+                        const double yP = centerY + (0.5 - prev.exitRatio) * denom + s.yOffset;
+                        const double yC = centerY + (0.5 - ratio)          * denom + s.yOffset;
+                        poly.append(QPointF(xP, yP));
+                        poly.append(QPointF(xC, yC));
+                    }
+                    emitPixel(cur);
+                }
+                prev = cur;
+                cur.px         = px;
+                cur.enterRatio = ratio;
+                cur.exitRatio  = ratio;
+                cur.pMin       = ratio;
+                cur.pMax       = ratio;
+                cur.used       = true;
             } else {
-                if (ratio < pMin) pMin = ratio;
-                if (ratio > pMax) pMax = ratio;
+                if (ratio < cur.pMin) cur.pMin = ratio;
+                if (ratio > cur.pMax) cur.pMax = ratio;
+                cur.exitRatio = ratio;
             }
-            lastRatio = ratio;
         }
-        flush(prevPx);
-        p->drawLines(lines);
+        // Последний пиксель
+        if (cur.used) {
+            if (prev.used) {
+                const double xP = cLeft + prev.px + 0.5;
+                const double xC = cLeft + cur.px  + 0.5;
+                const double yP = centerY + (0.5 - prev.exitRatio) * denom + s.yOffset;
+                const double yC = centerY + (0.5 - cur.enterRatio) * denom + s.yOffset;
+                poly.append(QPointF(xP, yP));
+                poly.append(QPointF(xC, yC));
+            }
+            emitPixel(cur);
+        }
+
+        if (!poly.isEmpty())
+            p->drawPolyline(poly);
     }
 
     if (pps >= 4.0f) {
