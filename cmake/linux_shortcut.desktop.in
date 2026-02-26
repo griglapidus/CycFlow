@@ -1,0 +1,9 @@
+# cmake/linux_shortcut.desktop.in
+
+[Desktop Entry]
+Type=Application
+Name=@TARGET_NAME@
+Exec=@TARGET_NAME@
+Icon=@TARGET_NAME@
+Terminal=false
+Categories=Utility;

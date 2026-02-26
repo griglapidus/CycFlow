@@ -34,3 +34,9 @@ target_link_libraries(CycBufReceiver
     Qt6::Widgets
     CycLib
 )
+
+include("${CMAKE_SOURCE_DIR}/cmake/SetupIcons.cmake")
+setup_app_icons(CycBufReceiver
+                "${CMAKE_SOURCE_DIR}/resources"
+                "icon_dark"
+                "${CMAKE_SOURCE_DIR}/cmake")

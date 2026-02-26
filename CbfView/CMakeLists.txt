@@ -32,3 +32,9 @@ target_link_libraries(CbfView
     Qt6::Widgets
     CycLib
 )
+
+include("${CMAKE_SOURCE_DIR}/cmake/SetupIcons.cmake")
+setup_app_icons(CbfView
+                "${CMAKE_SOURCE_DIR}/resources"
+                "icon"
+                "${CMAKE_SOURCE_DIR}/cmake")
