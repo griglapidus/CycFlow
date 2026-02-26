@@ -7,9 +7,8 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setStyle("Fusion");
 
-    // Configure QSettings path
-    QCoreApplication::setOrganizationName("CycLibTools");
-    QCoreApplication::setApplicationName("MDIStreamingViewer");
+    QCoreApplication::setOrganizationName("CycTools");
+    QCoreApplication::setApplicationName("CycBufReceiver");
 
     // Register custom types for signal/slot queues across threads
     qRegisterMetaType<QList<SeriesBatch>>("QList<SeriesBatch>");
@@ -17,6 +16,10 @@ int main(int argc, char *argv[])
 
     MainWindow w;
     w.show();
+
+    app.setApplicationName("CycBufReceiver");
+    app.setApplicationVersion(APP_VERSION);
+    app.setWindowIcon(QIcon(":/icons/icon_dark"));
 
     return app.exec();
 }

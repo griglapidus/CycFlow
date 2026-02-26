@@ -32,5 +32,9 @@ int main(int argc, char *argv[])
         mainWindow.openFile(args.first());
     }
 
+    app.setApplicationName("CbfView");
+    app.setApplicationVersion(APP_VERSION);
+    app.setWindowIcon(QIcon(":/icons/icon"));
+
     return app.exec();
 }
