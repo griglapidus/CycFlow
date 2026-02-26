@@ -4,6 +4,7 @@
 #include "ChartModel.h"
 
 #include <QWidget>
+#include <QString>
 #include <QAbstractScrollArea>
 #include <QSet>
 
@@ -42,6 +43,7 @@ private:
                   const ChartSeries &s, int cursor, bool selected) const;
 
     static constexpr int kResizeZone = 5;
+    static QString formatTimestamp(double epochSec);
     int rowAtResizeHandle(int y) const;
     int rowAt(int y) const;        // строка под указателем (не resize-зона)
     int rowTop(int row) const;

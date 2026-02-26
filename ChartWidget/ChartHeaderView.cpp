@@ -1,11 +1,13 @@
 #include "ChartHeaderView.h"
 
 #include <QPainter>
+#include <QDateTime>
 #include <QMouseEvent>
 #include <QContextMenuEvent>
 #include <QScrollBar>
 #include <QMenu>
 #include <QAction>
+#include <QTimeZone>
 
 ChartHeaderView::ChartHeaderView(ChartModel *model, QWidget *parent)
     : QWidget(parent), m_model(model)
@@ -202,6 +204,34 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
     menu.exec(e->globalPos());
 }
 
+
+// ─── Timestamp formatting ─────────────────────────────────────────────────────
+
+// epoch в секундах (double, дробная часть — субсекундная часть)
+QString ChartHeaderView::formatTimestamp(double epochSec)
+{
+    if (epochSec <= 0 || !std::isfinite(epochSec)) return QStringLiteral("—");
+
+    const qint64 wholeSec = static_cast<qint64>(epochSec);
+    const int    ms       = static_cast<int>((epochSec - wholeSec) * 1000.0 + 0.5);
+
+    const QTimeZone localTz = QTimeZone::systemTimeZone();
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(wholeSec, localTz);
+    const int offsetSec = localTz.offsetFromUtc(dt);
+    const int offsetH   = std::abs(offsetSec) / 3600;
+    const int offsetM   = (std::abs(offsetSec) % 3600) / 60;
+    const QString tzStr = QString("%1%2:%3")
+                              .arg(offsetSec >= 0 ? "+" : "-")
+                              .arg(offsetH, 2, 10, QLatin1Char('0'))
+                              .arg(offsetM, 2, 10, QLatin1Char('0'));
+
+    return dt.toString(QStringLiteral("yyyy-MM-dd\nHH:mm:ss"))
+           + QStringLiteral(".")
+           + QString::number(ms).rightJustified(3, QLatin1Char('0'))
+           + QStringLiteral(" ")
+           + tzStr;
+}
+
 // ─── Paint ────────────────────────────────────────────────────────────────────
 
 void ChartHeaderView::paintEvent(QPaintEvent *)
@@ -269,9 +299,9 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
                     QString("×%1").arg(s.yScale, 0, 'f', 1));
     }
 
-    QFont fv("Consolas", 11);
-    p->setFont(fv);
     const int n = sampleCount(s.data);
+    const bool isTimestamp = (s.name == QLatin1String("TimeStamp"));
+
     if (cursor >= 0 && cursor < n) {
         p->setPen(s.color.lighter(140));
         const std::size_t bufIdx = s.data.index();
@@ -280,9 +310,38 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
         else if (bufIdx == 7) valStr = QString::number(sampleAtU64(s.data, cursor));
         else if (bufIdx <= 5) valStr = QString::number(static_cast<long long>(sampleAt(s.data, cursor)));
         else                  valStr = QString::number(sampleAt(s.data, cursor), 'g', 6);
-        p->drawText(tr, Qt::AlignBottom | Qt::AlignLeft, valStr);
+
+        if (isTimestamp) {
+            // Числовое значение — мелким шрифтом сверху (уже есть имя, поэтому под ним)
+            QFont fNum("Consolas", 9);
+            p->setFont(fNum);
+            const int nameBottom = tr.top() + QFontMetrics(QFont("Consolas", 9, QFont::Bold)).height() + 2;
+            p->drawText(QRect(tr.left(), nameBottom, tr.width(), tr.height()),
+                        Qt::AlignTop | Qt::AlignLeft, valStr);
+
+            // Читаемая дата/время — двумя строками снизу
+            QFont fDt("Consolas", 9);
+            p->setFont(fDt);
+            const double epochSec = sampleAt(s.data, cursor);
+            const QString dtStr = formatTimestamp(epochSec); // содержит \n
+            const QFontMetrics fmDt(fDt);
+            const int lineH  = fmDt.height();
+            const int nLines = dtStr.count(QLatin1Char('\n')) + 1;
+            const int blockH = lineH * nLines;
+            // Рисуем блок прижатым к низу строки
+            const QRect dtRect(tr.left(), tr.bottom() - blockH, tr.width(), blockH);
+            p->drawText(dtRect,
+                        Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap,
+                        dtStr);
+        } else {
+            QFont fv("Consolas", 11);
+            p->setFont(fv);
+            p->drawText(tr, Qt::AlignBottom | Qt::AlignLeft, valStr);
+        }
     } else {
         p->setPen(noValColor);
+        QFont fv("Consolas", 11);
+        p->setFont(fv);
         p->drawText(tr, Qt::AlignBottom | Qt::AlignLeft, QStringLiteral("—"));
     }
 }
