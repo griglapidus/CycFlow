@@ -66,12 +66,18 @@ void ChartView::setChartModel(ChartModel *model)
             this, &ChartView::onDataAppended);
     connect(model, &ChartModel::rowsInserted,
             this, [this]() { syncColumnWidth(); });
-    // seriesDisplayChanged: полное обновление viewport — второй проход
-    // paintEvent рисует линии всех строк, частичный update даёт артефакты.
     connect(model, &ChartModel::seriesDisplayChanged,
             this, [this](const QString &, int) {
                 viewport()->update();
             });
+    connect(model, &ChartModel::modelReset, this, [this]() {
+        m_pendingOldSamples = 0;
+        m_pendingNewSamples = 0;
+        m_lastVisibleCount = -1;
+        horizontalScrollBar()->setValue(0);
+        syncColumnWidth();
+        viewport()->update();
+    });
 
     m_pendingOldSamples = model->maxSampleCount();
     m_pendingNewSamples = model->maxSampleCount();

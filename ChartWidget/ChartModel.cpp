@@ -41,6 +41,19 @@ void ChartModel::clearSeries(const QString &name)
     if (row >= 0) emit dataChanged(index(row, 0), index(row, 0));
 }
 
+void ChartModel::clearAll()
+{
+    beginResetModel();
+    {
+        QWriteLocker lk(&m_lock);
+        m_data.clear();
+        m_order.clear();
+        m_rowIndex.clear();
+        m_cursor.store(-1, std::memory_order_relaxed);
+    }
+    endResetModel();
+}
+
 const ChartSeries *ChartModel::seriesByName(const QString &name) const
 {
     auto it = m_data.constFind(name);

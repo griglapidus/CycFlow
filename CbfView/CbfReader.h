@@ -13,6 +13,7 @@ struct CbfSeriesConfig {
     QColor color;
     SampleType type;
     int id;
+    int index;
 };
 
 class CbfReader : public QObject

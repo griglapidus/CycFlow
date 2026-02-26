@@ -21,16 +21,15 @@ int main() {
 
         // 1. Prepare Schema with explicit IDs
         std::vector<PAttr> attrs;
-        attrs.push_back(PAttr("Counter",  DataType::dtInt8,   1));
-        attrs.push_back(PAttr("Voltage",  DataType::dtFloat,  2));
-        attrs.push_back(PAttr("Current",  DataType::dtFloat,  3));
-        attrs.push_back(PAttr("ADC ch0",  DataType::dtInt16,  4));
-        attrs.push_back(PAttr("Pressure", DataType::dtDouble, 5));
+        attrs.push_back(PAttr("Counter",  DataType::dtInt8,   2));
+        attrs.push_back(PAttr("Voltage",  DataType::dtFloat,  1));
+        attrs.push_back(PAttr("Current",  DataType::dtFloat,  1));
+        attrs.push_back(PAttr("ADC ch0",  DataType::dtInt16,  1));
+        attrs.push_back(PAttr("Pressure", DataType::dtDouble, 1));
 
         RecRule rule;
         rule.init(attrs);
 
-        int idTS = PReg::getID("TimeStamp");
         int idCounter = PReg::getID("Counter");
         int idVoltage = PReg::getID("Voltage");
         int idCurrent = PReg::getID("Current");
@@ -66,7 +65,6 @@ int main() {
 
             for (int i = 0; i < batchSize; ++i) {
                 Record rec = writer.nextRecord();
-                double TS = cyc::get_current_epoch_time();
                 int8_t counterVal = static_cast<int8_t>((tick + i) % 256);
                 float  vVal       = 12.0f + 2.5f * std::sin((tick + i) * 0.05f);
                 float  cVal       = 3.2f + 0.8f * std::sin((tick + i) * 0.08f);
@@ -74,8 +72,8 @@ int main() {
                 double pVal       = 101.3 + 1.2 * std::sin((tick + i) * 0.03);
 
                 // Use specific setters for performance and type safety
-                //rec.setDouble(idTS, TS);
                 rec.setInt8(idCounter, counterVal);
+                rec.setInt8(idCounter, counterVal + 20, 1);
                 rec.setFloat(idVoltage, vVal);
                 rec.setFloat(idCurrent, cVal);
                 rec.setInt16(idAdc, adcVal);

@@ -16,6 +16,7 @@ struct CbfSeriesConfig {
     QColor color;
     SampleType type;
     int id;
+    int index;
 };
 
 #endif // APPCONFIG_H

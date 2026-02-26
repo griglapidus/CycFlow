@@ -39,14 +39,29 @@ void ChartConsumer::onConsumeStart() {
     int colorIndex = 0;
 
     for (const auto& attr : rule.getAttributes()) {
-        CbfSeriesConfig cfg;
-        cfg.name = QString::fromStdString(attr.name);
-        cfg.color = colors[colorIndex++ % colors.size()];
-        cfg.type = mapFieldType(rule.getType(attr.id));
-        cfg.id = attr.id;
-        m_configs.append(cfg);
+        QString baseName = QString::fromStdString(attr.name);
 
-        m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
+        size_t count = attr.count;
+        if (count == 0) count = 1; // Failsafe
+
+        // Create a distinct series for each element of the array
+        for (size_t i = 0; i < count; ++i) {
+            CbfSeriesConfig cfg;
+
+            if (count > 1) {
+                cfg.name = QString("%1[%2]").arg(baseName).arg(i);
+            } else {
+                cfg.name = baseName;
+            }
+
+            cfg.color = colors[colorIndex++ % colors.size()];
+            cfg.type = mapFieldType(rule.getType(attr.id));
+            cfg.id = attr.id;
+            cfg.index = static_cast<int>(i);
+
+            m_configs.append(cfg);
+            m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
+        }
     }
 
     emit headerParsed(m_configs);
@@ -56,14 +71,33 @@ void ChartConsumer::consumeRecord(const cyc::Record& rec) {
     for (int i = 0; i < m_configs.size(); ++i) {
         const auto& cfg = m_configs[i];
 
-        std::visit([&rec, id = cfg.id](auto& vec) {
+        std::visit([&rec, id = cfg.id, idx = cfg.index](auto& vec) {
             using T = std::decay_t<decltype(vec[0])>;
-            if constexpr (std::is_same_v<T, int32_t>) {
-                vec.append(rec.getInt32(id));
+
+            // Map the variant's underlying type directly to Record's typed accessors
+            if constexpr (std::is_same_v<T, int8_t>) {
+                vec.append(rec.getInt8(id, idx));
+            } else if constexpr (std::is_same_v<T, uint8_t>) {
+                vec.append(rec.getUInt8(id, idx));
+            } else if constexpr (std::is_same_v<T, int16_t>) {
+                vec.append(rec.getInt16(id, idx));
+            } else if constexpr (std::is_same_v<T, uint16_t>) {
+                vec.append(rec.getUInt16(id, idx));
+            } else if constexpr (std::is_same_v<T, int32_t>) {
+                vec.append(rec.getInt32(id, idx));
+            } else if constexpr (std::is_same_v<T, uint32_t>) {
+                vec.append(rec.getUInt32(id, idx));
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+                vec.append(rec.getInt64(id, idx));
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                vec.append(rec.getUInt64(id, idx));
+            } else if constexpr (std::is_same_v<T, float>) {
+                vec.append(rec.getFloat(id, idx));
             } else if constexpr (std::is_same_v<T, double>) {
-                vec.append(rec.getDouble(id));
+                vec.append(rec.getDouble(id, idx));
             } else {
-                vec.append(static_cast<T>(rec.getValue(id)));
+                // Fallback for pointers, booleans, chars
+                vec.append(static_cast<T>(rec.getValue(id, idx)));
             }
         }, m_currentBatch[i].samples);
     }

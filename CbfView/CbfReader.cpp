@@ -12,17 +12,23 @@ CbfReader::CbfReader(const QString &filePath, QObject *parent)
 
 SampleType CbfReader::mapFieldType(cyc::DataType cbfType)
 {
-    // Map known Cyc data types to Chart SampleType
-    // Expand this switch if other DataTypes are available in cyc library
-    if (cbfType == cyc::DataType::dtInt32) {
-        return SampleType::Int32;
-    }
-    if (cbfType == cyc::DataType::dtDouble) {
-        return SampleType::Float64;
-    }
+    switch (cbfType) {
+    case cyc::DataType::dtInt8:   return SampleType::Int8;
+    case cyc::DataType::dtUInt8:  return SampleType::UInt8;
+    case cyc::DataType::dtInt16:  return SampleType::Int16;
+    case cyc::DataType::dtUInt16: return SampleType::UInt16;
+    case cyc::DataType::dtInt32:  return SampleType::Int32;
+    case cyc::DataType::dtUInt32: return SampleType::UInt32;
+    case cyc::DataType::dtInt64:  return SampleType::Int64;
+    case cyc::DataType::dtUInt64: return SampleType::UInt64;
+    case cyc::DataType::dtFloat:  return SampleType::Float32;
+    case cyc::DataType::dtDouble: return SampleType::Float64;
 
-    // Default fallback
-    return SampleType::Float64;
+    case cyc::DataType::dtBool:   return SampleType::UInt8;
+    case cyc::DataType::dtChar:   return SampleType::Int8;
+
+    default:                      return SampleType::Float64;
+    }
 }
 
 void CbfReader::process()
@@ -45,18 +51,32 @@ void CbfReader::process()
             if (file.readRule(header, rule)) {
                 hasRule = true;
 
-                const QList<QColor> colors = {Qt::green, Qt::cyan, Qt::magenta, Qt::yellow};
+                const QList<QColor> colors = {Qt::green, Qt::cyan, Qt::magenta, Qt::yellow, Qt::red, Qt::white};
                 int colorIndex = 0;
 
                 const auto& attributes = rule.getAttributes();
                 for (const auto& attr : attributes) {
-                    CbfSeriesConfig cfg;
-                    cfg.name = QString::fromStdString(attr.name);
-                    cfg.color = colors[colorIndex++ % colors.size()];
-                    cfg.type = mapFieldType(rule.getType(attr.id));
-                    cfg.id = attr.id;
+                    QString baseName = QString::fromStdString(attr.name);
 
-                    seriesConfigs.append(cfg);
+                    size_t count = attr.count;
+                    if (count == 0) count = 1;
+
+                    for (size_t i = 0; i < count; ++i) {
+                        CbfSeriesConfig cfg;
+
+                        if (count > 1) {
+                            cfg.name = QString("%1[%2]").arg(baseName).arg(i);
+                        } else {
+                            cfg.name = baseName;
+                        }
+
+                        cfg.color = colors[colorIndex++ % colors.size()];
+                        cfg.type = mapFieldType(rule.getType(attr.id));
+                        cfg.id = attr.id;
+                        cfg.index = static_cast<int>(i);
+
+                        seriesConfigs.append(cfg);
+                    }
                 }
 
                 emit headerParsed(seriesConfigs);
@@ -71,7 +91,6 @@ void CbfReader::process()
                 break;
             }
 
-            // Allocate buffer and initialize Record based on test_Cbf.cpp logic
             std::vector<uint8_t> rawBuffer(rule.getRecSize());
             cyc::Record rec(rule, rawBuffer.data());
 
@@ -86,16 +105,31 @@ void CbfReader::process()
                 for (int i = 0; i < seriesConfigs.size(); ++i) {
                     const auto& cfg = seriesConfigs[i];
 
-                    std::visit([&rec, id = cfg.id](auto& vec) {
+                    std::visit([&rec, id = cfg.id, idx = cfg.index](auto& vec) {
                         using T = std::decay_t<decltype(vec[0])>;
 
-                        // Use specific getters if known, otherwise fallback to getValue
-                        if constexpr (std::is_same_v<T, int32_t>) {
-                            vec.append(rec.getInt32(id));
+                        if constexpr (std::is_same_v<T, int8_t>) {
+                            vec.append(rec.getInt8(id, idx));
+                        } else if constexpr (std::is_same_v<T, uint8_t>) {
+                            vec.append(rec.getUInt8(id, idx));
+                        } else if constexpr (std::is_same_v<T, int16_t>) {
+                            vec.append(rec.getInt16(id, idx));
+                        } else if constexpr (std::is_same_v<T, uint16_t>) {
+                            vec.append(rec.getUInt16(id, idx));
+                        } else if constexpr (std::is_same_v<T, int32_t>) {
+                            vec.append(rec.getInt32(id, idx));
+                        } else if constexpr (std::is_same_v<T, uint32_t>) {
+                            vec.append(rec.getUInt32(id, idx));
+                        } else if constexpr (std::is_same_v<T, int64_t>) {
+                            vec.append(rec.getInt64(id, idx));
+                        } else if constexpr (std::is_same_v<T, uint64_t>) {
+                            vec.append(rec.getUInt64(id, idx));
+                        } else if constexpr (std::is_same_v<T, float>) {
+                            vec.append(rec.getFloat(id, idx));
                         } else if constexpr (std::is_same_v<T, double>) {
-                            vec.append(rec.getDouble(id));
+                            vec.append(rec.getDouble(id, idx));
                         } else {
-                            vec.append(static_cast<T>(rec.getValue(id)));
+                            vec.append(static_cast<T>(rec.getValue(id, idx)));
                         }
                     }, currentBatch[i].samples);
                 }

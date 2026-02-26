@@ -11,15 +11,15 @@ namespace cyc {
 /**
  * @def DECLARE_RECORD_ACCESSORS
  * @brief Helper macro to generate typed getters and setters for record fields.
- * * @param NAME The capitalized name of the type (e.g., Int32, Double).
+ * @param NAME The capitalized name of the type (e.g., Int32, Double).
  * @param TYPE The actual C++ type (e.g., int32_t, double).
  */
 #define DECLARE_RECORD_ACCESSORS(NAME, TYPE) \
-TYPE& get##NAME(int id) { return *static_cast<TYPE*>(getVoid(id)); } \
+TYPE& get##NAME(int id, size_t index = 0) { return static_cast<TYPE*>(getVoid(id))[index]; } \
     TYPE* get##NAME##Ptr(int id) { return static_cast<TYPE*>(getVoid(id)); } \
-    const TYPE& get##NAME(int id) const { return *static_cast<const TYPE*>(getVoid(id)); } \
+    const TYPE& get##NAME(int id, size_t index = 0) const { return static_cast<const TYPE*>(getVoid(id))[index]; } \
     const TYPE* get##NAME##Ptr(int id) const { return static_cast<const TYPE*>(getVoid(id)); } \
-    void set##NAME(int id, TYPE val) { *static_cast<TYPE*>(getVoid(id)) = val; }
+    void set##NAME(int id, TYPE val, size_t index = 0) { static_cast<TYPE*>(getVoid(id))[index] = val; }
 
 /**
  * @class Record
@@ -81,18 +81,19 @@ public:
 
     /**
      * @brief Generic getter that converts any fundamental field to a double.
-     * Useful for plotting graphs or generic math operations without strict typing.
      * @param id The unique attribute ID.
+     * @param index Array index (0 for scalars).
      * @return The field value cast to a double. Returns 0.0 on failure.
      */
-    [[nodiscard]] double getValue(int id) const;
+    [[nodiscard]] double getValue(int id, size_t index = 0) const;
 
     /**
      * @brief Generic setter that assigns a double value to any fundamental field.
      * @param id The unique attribute ID.
      * @param val The value to set (will be cast to the field's actual type).
+     * @param index Array index (0 for scalars).
      */
-    void setValue(int id, double val);
+    void setValue(int id, double val, size_t index = 0);
 
     // --- Typed Accessors ---
 
@@ -114,14 +115,14 @@ public:
      * @param id The unique attribute ID.
      * @param val The pointer value to store.
      */
-    void setPtr(int id, void* val) { *static_cast<void**>(getVoid(id)) = val; }
+    void setPtr(int id, void* val, size_t index = 0) { static_cast<void**>(getVoid(id))[index] = val; }
 
     /**
      * @brief Gets a raw pointer value from a pointer-type field.
      * @param id The unique attribute ID.
      * @return The stored pointer value.
      */
-    [[nodiscard]] void* getPtr(int id) const { return *static_cast<void**>(getVoid(id)); }
+    [[nodiscard]] void* getPtr(int id, size_t index = 0) const { return static_cast<void**>(getVoid(id))[index]; }
 
 private:
     const RecRule& m_rule;

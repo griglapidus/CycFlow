@@ -69,12 +69,21 @@ void TcpSessionWidget::tryConnect() {
     if (m_receiver->connect(m_config.host.toStdString(), m_config.port, m_config.bufferName.toStdString())) {
         m_connectTimer->stop();
 
+        if (m_consumer) {
+            m_consumer->stop();
+            m_consumer->deleteLater();
+            m_consumer = nullptr;
+        }
+
         auto buffer = m_receiver->getBuffer();
         if (buffer) {
             m_ruleTextCache = QString::fromStdString(buffer->getRule().toText());
 
-            m_consumer = new ChartConsumer(buffer);
             ChartModel* model = m_chartWidget->model();
+
+            model->clearAll();
+
+            m_consumer = new ChartConsumer(buffer);
 
             QObject::connect(m_consumer, &ChartConsumer::headerParsed, model, [model](const QVector<CbfSeriesConfig>& configs) {
                 for (const auto& cfg : configs) {

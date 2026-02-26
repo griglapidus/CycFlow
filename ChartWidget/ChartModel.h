@@ -29,6 +29,7 @@ public:
 
     void appendBatch(const QList<SeriesBatch> &batch);
     void clearSeries(const QString &name);
+    void clearAll();
 
     const ChartSeries *seriesByName(const QString &name) const;
     const ChartSeries *series(int row) const;
