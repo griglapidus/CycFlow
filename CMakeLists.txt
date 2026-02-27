@@ -11,6 +11,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(asio)
 
+find_package(Qt6 COMPONENTS Widgets QUIET)
+if(Qt6_FOUND)
+    message(STATUS "Qt6 found. Qt-based projects are enabled.")
+    set(QT_PROJECTS_ENABLED ON)
+else()
+    message(WARNING "Qt6 not found. Qt-based projects will be skipped.")
+    set(QT_PROJECTS_ENABLED OFF)
+endif()
+
 if(NOT TARGET asio::asio)
     add_library(asio_lib INTERFACE)
     target_include_directories(asio_lib INTERFACE "${asio_SOURCE_DIR}/include")
@@ -48,15 +57,19 @@ set(HEADER_DEST_DIR "${CMAKE_SOURCE_DIR}/build/include")
 # --------------------------------------
 
 add_subdirectory(CycLib)
-add_subdirectory(CbfView)
-add_subdirectory(CycBufReceiver)
+if(QT_PROJECTS_ENABLED)
+    add_subdirectory(CbfView)
+    add_subdirectory(CycBufReceiver)
+endif()
 
 option(BUILD_TESTING "Build tests" OFF)
 
 if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
+    if(QT_PROJECTS_ENABLED)
     add_subdirectory(ChartViewTest)
+    endif()
     add_subdirectory(CycTestServer)
 endif()
 
