@@ -68,7 +68,6 @@ private:
 
     RecRule m_negotiatedRule;
     bool m_connected;
-    size_t m_writerBatchSize;
 };
 
 } // namespace cyc

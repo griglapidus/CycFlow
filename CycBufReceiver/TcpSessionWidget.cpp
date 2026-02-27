@@ -85,11 +85,15 @@ void TcpSessionWidget::tryConnect() {
 
             m_consumer = new ChartConsumer(buffer);
 
-            QObject::connect(m_consumer, &ChartConsumer::headerParsed, model, [model](const QVector<CbfSeriesConfig>& configs) {
-                for (const auto& cfg : configs) {
-                    model->addSeries(cfg.name, cfg.color, cfg.type);
-                }
-            }, Qt::QueuedConnection);
+            QObject::connect(m_consumer, &ChartConsumer::headerParsed, model,
+                             [model](const QVector<CbfSeriesConfig>& configs) {
+                                 for (const auto& cfg : configs) {
+                                     if (cfg.isDigital)
+                                         model->addDigitalSeries(cfg.name, cfg.color);
+                                     else
+                                         model->addSeries(cfg.name, cfg.color, cfg.type);
+                                 }
+                             }, Qt::QueuedConnection);
 
             QObject::connect(m_consumer, &ChartConsumer::batchReady, model, &ChartModel::appendBatch, Qt::QueuedConnection);
 

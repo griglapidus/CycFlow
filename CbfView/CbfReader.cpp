@@ -1,6 +1,7 @@
 #include "CbfReader.h"
 #include "Core/Record.h"
 #include "Core/PAttr.h"
+#include "Core/PReg.h"
 #include <QVariant>
 #include <vector>
 #include "Cbf/CbfFile.h"
@@ -56,25 +57,46 @@ void CbfReader::process()
 
                 const auto& attributes = rule.getAttributes();
                 for (const auto& attr : attributes) {
-                    QString baseName = QString::fromStdString(attr.name);
+                    const QString baseName = QString::fromStdString(attr.name);
+
+                    if (attr.hasBitFields()) {
+                        CbfSeriesConfig regCfg;
+                        regCfg.name  = baseName;
+                        regCfg.color = colors[colorIndex++ % colors.size()];
+                        regCfg.type  = mapFieldType(rule.getType(attr.id));
+                        regCfg.id    = attr.id;
+                        regCfg.index = 0;
+                        seriesConfigs.append(regCfg);
+
+                        for (int bitPos = 0; bitPos < static_cast<int>(attr.bitIds.size()); ++bitPos) {
+                            const int bid = attr.bitIds[bitPos];
+                            if (bid == 0) continue;
+
+                            CbfSeriesConfig bitCfg;
+                            bitCfg.name          = QString::fromStdString(cyc::PReg::getName(bid));
+                            bitCfg.color         = colors[colorIndex++ % colors.size()];
+                            bitCfg.type          = SampleType::UInt8;
+                            bitCfg.id            = attr.id;
+                            bitCfg.index         = 0;
+                            bitCfg.isDigital     = true;
+                            bitCfg.bitPregId     = bid;
+                            seriesConfigs.append(bitCfg);
+                        }
+                        continue;
+                    }
 
                     size_t count = attr.count;
                     if (count == 0) count = 1;
 
                     for (size_t i = 0; i < count; ++i) {
                         CbfSeriesConfig cfg;
-
-                        if (count > 1) {
-                            cfg.name = QString("%1[%2]").arg(baseName).arg(i);
-                        } else {
-                            cfg.name = baseName;
-                        }
-
+                        cfg.name  = (count > 1)
+                                       ? QString("%1[%2]").arg(baseName).arg(i)
+                                       : baseName;
                         cfg.color = colors[colorIndex++ % colors.size()];
-                        cfg.type = mapFieldType(rule.getType(attr.id));
-                        cfg.id = attr.id;
+                        cfg.type  = mapFieldType(rule.getType(attr.id));
+                        cfg.id    = attr.id;
                         cfg.index = static_cast<int>(i);
-
                         seriesConfigs.append(cfg);
                     }
                 }
@@ -105,32 +127,26 @@ void CbfReader::process()
                 for (int i = 0; i < seriesConfigs.size(); ++i) {
                     const auto& cfg = seriesConfigs[i];
 
+                    if (cfg.isDigital) {
+                        // Цифровая серия: читаем бит по его PReg ID
+                        auto& vec = std::get<QVector<uint8_t>>(currentBatch[i].samples);
+                        vec.append(rec.getBit(cfg.bitPregId) ? uint8_t(1) : uint8_t(0));
+                        continue;
+                    }
+
                     std::visit([&rec, id = cfg.id, idx = cfg.index](auto& vec) {
                         using T = std::decay_t<decltype(vec[0])>;
-
-                        if constexpr (std::is_same_v<T, int8_t>) {
-                            vec.append(rec.getInt8(id, idx));
-                        } else if constexpr (std::is_same_v<T, uint8_t>) {
-                            vec.append(rec.getUInt8(id, idx));
-                        } else if constexpr (std::is_same_v<T, int16_t>) {
-                            vec.append(rec.getInt16(id, idx));
-                        } else if constexpr (std::is_same_v<T, uint16_t>) {
-                            vec.append(rec.getUInt16(id, idx));
-                        } else if constexpr (std::is_same_v<T, int32_t>) {
-                            vec.append(rec.getInt32(id, idx));
-                        } else if constexpr (std::is_same_v<T, uint32_t>) {
-                            vec.append(rec.getUInt32(id, idx));
-                        } else if constexpr (std::is_same_v<T, int64_t>) {
-                            vec.append(rec.getInt64(id, idx));
-                        } else if constexpr (std::is_same_v<T, uint64_t>) {
-                            vec.append(rec.getUInt64(id, idx));
-                        } else if constexpr (std::is_same_v<T, float>) {
-                            vec.append(rec.getFloat(id, idx));
-                        } else if constexpr (std::is_same_v<T, double>) {
-                            vec.append(rec.getDouble(id, idx));
-                        } else {
-                            vec.append(static_cast<T>(rec.getValue(id, idx)));
-                        }
+                        if constexpr (std::is_same_v<T, int8_t>)        vec.append(rec.getInt8  (id, idx));
+                        else if constexpr (std::is_same_v<T, uint8_t>)  vec.append(rec.getUInt8 (id, idx));
+                        else if constexpr (std::is_same_v<T, int16_t>)  vec.append(rec.getInt16 (id, idx));
+                        else if constexpr (std::is_same_v<T, uint16_t>) vec.append(rec.getUInt16(id, idx));
+                        else if constexpr (std::is_same_v<T, int32_t>)  vec.append(rec.getInt32 (id, idx));
+                        else if constexpr (std::is_same_v<T, uint32_t>) vec.append(rec.getUInt32(id, idx));
+                        else if constexpr (std::is_same_v<T, int64_t>)  vec.append(rec.getInt64 (id, idx));
+                        else if constexpr (std::is_same_v<T, uint64_t>) vec.append(rec.getUInt64(id, idx));
+                        else if constexpr (std::is_same_v<T, float>)    vec.append(rec.getFloat (id, idx));
+                        else if constexpr (std::is_same_v<T, double>)   vec.append(rec.getDouble(id, idx));
+                        else vec.append(static_cast<T>(rec.getValue(id, idx)));
                     }, currentBatch[i].samples);
                 }
 

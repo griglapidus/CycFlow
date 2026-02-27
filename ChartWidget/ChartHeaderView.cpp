@@ -52,7 +52,11 @@ int ChartHeaderView::rowAtResizeHandle(int y) const
         const ChartSeries *s = m_model->series(r);
         const int rh  = s ? s->rowHeight : m_model->rowHeight();
         const int bot = rowTop(r) - m_scrollOffset + rh;
-        if (std::abs(y - bot) <= kResizeZone) return r;
+        if (std::abs(y - bot) <= kResizeZone) {
+            // Фиксированные строки нельзя ресайзить
+            if (s && s->minRowHeight > 0 && s->minRowHeight == s->maxRowHeight) return -1;
+            return r;
+        }
     }
     return -1;
 }
@@ -73,7 +77,17 @@ int ChartHeaderView::rowAt(int y) const
 void ChartHeaderView::mousePressEvent(QMouseEvent *e)
 {
     if (e->button() == Qt::LeftButton) {
-        // Resize handle имеет приоритет
+
+        // ── Resize ширины заголовка (правый край) ─────────────────────────
+        if (e->pos().x() >= width() - kHeaderResizeZone) {
+            m_headerResizing     = true;
+            m_headerResizePressX = e->pos().x();
+            m_headerResizeStartW = width();
+            setCursor(Qt::SizeHorCursor);
+            e->accept(); return;
+        }
+
+        // Resize handle строки имеет приоритет над выделением
         const int resizeRow = rowAtResizeHandle(e->pos().y());
         if (resizeRow >= 0) {
             const ChartSeries *s = m_model->series(resizeRow);
@@ -113,15 +127,26 @@ void ChartHeaderView::mousePressEvent(QMouseEvent *e)
 
 void ChartHeaderView::mouseMoveEvent(QMouseEvent *e)
 {
+    // ── Drag ширины заголовка ────────────────────────────────────────────
+    if (m_headerResizing && (e->buttons() & Qt::LeftButton)) {
+        const int delta = e->pos().x() - m_headerResizePressX;
+        const int newW  = qBound(kHeaderMinWidth,
+                                m_headerResizeStartW + delta,
+                                kHeaderMaxWidth);
+        m_model->setHeaderWidth(newW);
+        e->accept(); return;
+    }
+
     if (m_resizing && (e->buttons() & Qt::LeftButton)) {
         const int delta = e->pos().y() - m_resizePressY;
-        const int newH  = qMax(30, m_resizeStartH + delta);
         const ChartSeries *s = m_model->series(m_resizeRow);
-        if (s) m_model->setSeriesRowHeight(s->name, newH);
+        if (s) m_model->setSeriesRowHeight(s->name, m_resizeStartH + delta);
         e->accept(); return;
     }
     if (rowAtResizeHandle(e->pos().y()) >= 0)
         setCursor(Qt::SizeVerCursor);
+    else if (e->pos().x() >= width() - kHeaderResizeZone)
+        setCursor(Qt::SizeHorCursor);
     else
         unsetCursor();
     QWidget::mouseMoveEvent(e);
@@ -129,6 +154,11 @@ void ChartHeaderView::mouseMoveEvent(QMouseEvent *e)
 
 void ChartHeaderView::mouseReleaseEvent(QMouseEvent *e)
 {
+    if (m_headerResizing) {
+        m_headerResizing = false;
+        unsetCursor();
+        e->accept(); return;
+    }
     if (m_resizing) { m_resizing = false; m_resizeRow = -1; unsetCursor(); e->accept(); return; }
     QWidget::mouseReleaseEvent(e);
 }
@@ -251,39 +281,66 @@ void ChartHeaderView::paintEvent(QPaintEvent *)
         if (y > height()) break;
         if (!s) continue;
         paintRow(&p, QRect(0, y, w, rh), *s, cursor, m_selectedRows.contains(r));
-        // Resize handle hint
-        p.fillRect(QRect(0, y + rh - 3, w, 3), QColor(40, 55, 80));
+        // Resize handle hint — не показываем для фиксированных строк (биты)
+        if (s->minRowHeight != s->maxRowHeight || s->minRowHeight == 0)
+            p.fillRect(QRect(0, y + rh - 3, w, 3), QColor(40, 55, 80));
     }
+
+    // Вертикальный resize handle — правый край всего заголовка
+    p.fillRect(QRect(w - 3, 0, 3, height()), QColor(40, 55, 80));
 }
 
 void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
                                const ChartSeries &s, int cursor, bool selected) const
 {
     static const QColor bgColor      = QColor(15, 18, 26);
-    static const QColor selColor     = QColor(25, 40, 70);   // фон выделенной строки
+    static const QColor selColor     = QColor(25, 40, 70);
     static const QColor dividerColor = QColor(38, 46, 64);
     static const QColor nameColor    = QColor(200, 210, 230);
     static const QColor noValColor   = QColor(80, 90, 110);
 
-    // Фон — с подсветкой при выделении
     p->fillRect(r, selected ? selColor : bgColor);
-
-    // Цветная полоска слева
     p->fillRect(QRect(r.left(), r.top(), 4, r.height()), s.color);
 
-    // Рамка выделения
     if (selected) {
         p->setPen(QPen(QColor(60, 110, 200), 1));
         p->drawRect(r.adjusted(0, 0, -1, -1));
     }
 
     p->setPen(QPen(dividerColor, 1));
-    p->drawLine(r.right(), r.top(),   r.right(),  r.bottom());
+    p->drawLine(r.right(), r.top(), r.right(), r.bottom());
     p->drawLine(r.left(),  r.bottom(), r.right(), r.bottom());
 
+    // Фиксированная высота (бит) → компактный вид: имя слева, значение справа
+    const bool isFixed = (s.minRowHeight > 0 && s.minRowHeight == s.maxRowHeight);
+    if (isFixed) {
+        const QRect tr = r.adjusted(10, 2, -6, -2);
+        QFont fn("Consolas", 10);
+        p->setFont(fn);
+        p->setPen(nameColor);
+        const QFontMetrics fm(fn);
+        p->drawText(tr, Qt::AlignVCenter | Qt::AlignLeft,
+                    fm.elidedText(s.name, Qt::ElideRight, tr.width() * 2 / 3));
+
+        const int n = sampleCount(s.data);
+        if (cursor >= 0 && cursor < n) {
+            const bool bitVal = (sampleAt(s.data, cursor) != 0.0);
+            p->setPen(bitVal ? s.color.lighter(140) : QColor(100, 110, 130));
+            QFont fv("Consolas", 11, QFont::Bold);
+            p->setFont(fv);
+            p->drawText(tr, Qt::AlignVCenter | Qt::AlignRight,
+                        bitVal ? QStringLiteral("1") : QStringLiteral("0"));
+        } else {
+            p->setPen(noValColor);
+            p->drawText(tr, Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("—"));
+        }
+        return;
+    }
+
+    // ── Обычный вид ───────────────────────────────────────────────────────
     const QRect tr = r.adjusted(10, 6, -6, -6);
 
-    QFont fn("Consolas", 9, QFont::Bold);
+    QFont fn("Consolas", 10, QFont::Bold);
     p->setFont(fn);
     p->setPen(nameColor);
     const QString nameStr = QString("%1  [%2]")
@@ -292,12 +349,16 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
                 p->fontMetrics().elidedText(nameStr, Qt::ElideRight, tr.width()));
 
     if (!qFuzzyCompare(s.yScale, 1.0f)) {
-        QFont fs("Consolas", 8);
+        QFont fs("Consolas", 10);
         p->setFont(fs);
         p->setPen(QColor(100, 130, 180));
         p->drawText(tr, Qt::AlignTop | Qt::AlignRight,
                     QString("×%1").arg(s.yScale, 0, 'f', 1));
     }
+
+    // Граница между именем и значением — значение никогда не перекрывает имя
+    const int nameBottom = tr.top() + QFontMetrics(fn).height() + 3;
+    const QRect valRect(tr.left(), nameBottom, tr.width(), tr.bottom() - nameBottom);
 
     const int n = sampleCount(s.data);
     const bool isTimestamp = (s.name == QLatin1String("TimeStamp"));
@@ -312,36 +373,29 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
         else                  valStr = QString::number(sampleAt(s.data, cursor), 'g', 6);
 
         if (isTimestamp) {
-            // Числовое значение — мелким шрифтом сверху (уже есть имя, поэтому под ним)
-            QFont fNum("Consolas", 9);
+            // Числовое значение — под именем
+            QFont fNum("Consolas", 10);
             p->setFont(fNum);
-            const int nameBottom = tr.top() + QFontMetrics(QFont("Consolas", 9, QFont::Bold)).height() + 2;
-            p->drawText(QRect(tr.left(), nameBottom, tr.width(), tr.height()),
-                        Qt::AlignTop | Qt::AlignLeft, valStr);
+            p->drawText(valRect, Qt::AlignTop | Qt::AlignLeft, valStr);
 
-            // Читаемая дата/время — двумя строками снизу
-            QFont fDt("Consolas", 9);
+            // Читаемая дата — прижата к низу строки
+            QFont fDt("Consolas", 10);
             p->setFont(fDt);
             const double epochSec = sampleAt(s.data, cursor);
-            const QString dtStr = formatTimestamp(epochSec); // содержит \n
+            const QString dtStr = formatTimestamp(epochSec);
             const QFontMetrics fmDt(fDt);
-            const int lineH  = fmDt.height();
-            const int nLines = dtStr.count(QLatin1Char('\n')) + 1;
-            const int blockH = lineH * nLines;
-            // Рисуем блок прижатым к низу строки
+            const int blockH = fmDt.height() * (dtStr.count(QLatin1Char('\n')) + 1);
             const QRect dtRect(tr.left(), tr.bottom() - blockH, tr.width(), blockH);
-            p->drawText(dtRect,
-                        Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap,
-                        dtStr);
+            p->drawText(dtRect, Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, dtStr);
         } else {
             QFont fv("Consolas", 11);
             p->setFont(fv);
-            p->drawText(tr, Qt::AlignBottom | Qt::AlignLeft, valStr);
+            p->drawText(valRect, Qt::AlignBottom | Qt::AlignLeft, valStr);
         }
     } else {
         p->setPen(noValColor);
         QFont fv("Consolas", 11);
         p->setFont(fv);
-        p->drawText(tr, Qt::AlignBottom | Qt::AlignLeft, QStringLiteral("—"));
+        p->drawText(valRect, Qt::AlignBottom | Qt::AlignLeft, QStringLiteral("—"));
     }
 }

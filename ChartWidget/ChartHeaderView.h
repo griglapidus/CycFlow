@@ -42,7 +42,10 @@ private:
     void paintRow(QPainter *p, const QRect &r,
                   const ChartSeries &s, int cursor, bool selected) const;
 
-    static constexpr int kResizeZone = 5;
+    static constexpr int kResizeZone       = 5;  ///< Пикселей от нижнего края строки для resize
+    static constexpr int kHeaderResizeZone = 6;  ///< Пикселей от правого края заголовка для resize ширины
+    static constexpr int kHeaderMinWidth   = 80;
+    static constexpr int kHeaderMaxWidth   = 500;
     static QString formatTimestamp(double epochSec);
     int rowAtResizeHandle(int y) const;
     int rowAt(int y) const;        // строка под указателем (не resize-зона)
@@ -51,11 +54,16 @@ private:
     ChartModel *m_model;
     int         m_scrollOffset = 0;
 
-    // Resize drag
+    // Resize строки по вертикали
     bool m_resizing     = false;
     int  m_resizeRow    = -1;
     int  m_resizePressY = 0;
     int  m_resizeStartH = 0;
+
+    // Resize ширины заголовка (drag правого края)
+    bool m_headerResizing      = false;
+    int  m_headerResizePressX  = 0;
+    int  m_headerResizeStartW  = 0;
 
     // Selection
     QSet<int> m_selectedRows;

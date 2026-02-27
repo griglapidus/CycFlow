@@ -7,6 +7,7 @@
 #include "PAttr.h"
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstddef>
 
 namespace cyc {
@@ -118,9 +119,8 @@ public:
      * @brief Serialises the schema to a delimited text string.
      *
      * Each line has the form:
-     *   `name;Type;count;offset[;bitField0,bitField1,...]\n`
-     * Bit-field columns are present only for attributes that define bit fields.
-     * Each column is either the named bit's string name or empty (reserved bit).
+     *   `name;Type;count;offset[;bitName0,skip,bitName1,...]\n`
+     * Bit fields use the same notation as PAttr's bitDefs constructor.
      *
      * @return Multi-line string representation.
      */
@@ -137,13 +137,14 @@ private:
     std::vector<PAttr>     m_headerAttrs;
     std::vector<PAttr>     m_attrs;
 
-    // --- O(1) caches indexed by PReg ID ---
+    // --- O(1) caches for plain fields (indexed by PReg ID via flat vector) ---
     std::vector<size_t>    m_offsetCache;   ///< Byte offset of the containing field.
     std::vector<DataType>  m_typeCache;     ///< DataType of the containing field.
 
-    /// Bit-field cache, indexed by PReg bit ID.
-    /// Valid entry: fieldId > 0.  Invalid (not a bit): fieldId == 0.
-    std::vector<BitRef>    m_bitCache;
+    /// Bit-field cache: maps bit's PReg ID → BitRef{fieldId, bitPos}.
+    /// Uses unordered_map to avoid sparse allocation when bit IDs are not
+    /// contiguous with plain-field IDs (which is the common case).
+    std::unordered_map<int, BitRef> m_bitCache;
 };
 
 } // namespace cyc

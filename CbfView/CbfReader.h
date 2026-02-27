@@ -5,16 +5,9 @@
 #include <QString>
 #include <QVector>
 #include <QColor>
+#include "../CycBufReceiver/AppConfig.h"
 #include "../ChartWidget/ChartDefs.h"
 #include "Core/Common.h"
-
-struct CbfSeriesConfig {
-    QString name;
-    QColor color;
-    SampleType type;
-    int id;
-    int index;
-};
 
 class CbfReader : public QObject
 {

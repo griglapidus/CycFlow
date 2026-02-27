@@ -1,6 +1,54 @@
 #include "ChartModel.h"
+#include <QFontMetrics>
 
 ChartModel::ChartModel(QObject *parent) : QAbstractTableModel(parent) {}
+
+// ─── Row height limits ────────────────────────────────────────────────────────
+//
+// Минимальные высоты вычисляются один раз из QFontMetrics — они зависят от
+// шрифта, поэтому нельзя задавать их константами в пикселях.
+//
+// Схема строки (обычная):
+//   [topPad] name [gap] value [botPad]
+//
+// Схема строки (TimeStamp):
+//   [topPad] name [gap] epochNum [gap] date_line1 [gap] date_line2 [botPad]
+
+namespace {
+
+struct RowHeightLimits { int min; int max; };
+
+// Параметры шрифтов должны совпадать с теми, что используются в paintRow.
+static RowHeightLimits computeLimits(ChartModel::RowKind kind)
+{
+    constexpr int kTopPad = 6;
+    constexpr int kBotPad = 6;
+    constexpr int kGap    = 3;
+
+    const int nameH  = QFontMetrics(QFont("Consolas",  9, QFont::Bold)).height();
+    const int valH   = QFontMetrics(QFont("Consolas", 11)).height();
+    const int smallH = QFontMetrics(QFont("Consolas",  9)).height();
+
+    switch (kind) {
+    case ChartModel::RowKind::Timestamp: {
+        // name + epochNum + date_line1 + date_line2
+        const int h = kTopPad + nameH + kGap + smallH + kGap + smallH + smallH + kBotPad;
+        return { h, INT_MAX };
+    }
+    case ChartModel::RowKind::Digital: {
+        // Фиксированная высота: имя + значение рядом на одной строке
+        const int h = kTopPad + qMax(nameH, valH) + kBotPad;
+        return { h, h };
+    }
+    default: {
+        // Обычное поле: name + value без наложения
+        const int h = kTopPad + nameH + kGap + valH + kBotPad;
+        return { h, INT_MAX };
+    }
+    }
+}
+
+} // namespace
 
 // ─── Series management ────────────────────────────────────────────────────────
 
@@ -8,11 +56,17 @@ QString ChartModel::addSeries(const QString &name, const QColor &color, SampleTy
 {
     { QReadLocker lk(&m_lock); if (m_data.contains(name)) return name; }
 
+    const RowKind kind = (name == QLatin1String("TimeStamp"))
+                             ? RowKind::Timestamp : RowKind::Regular;
+    const auto [minH, maxH] = computeLimits(kind);
+
     ChartSeries s;
-    s.name      = name;
-    s.color     = color;
-    s.data      = makeSampleBuffer(sampleType);
-    s.rowHeight = m_defaultRowHeight;
+    s.name         = name;
+    s.color        = color;
+    s.data         = makeSampleBuffer(sampleType);
+    s.rowHeight    = qBound(minH, m_defaultRowHeight, maxH);
+    s.minRowHeight = minH;
+    s.maxRowHeight = maxH;
     auto [lo, hi] = makeBounds(sampleType);
     s.minVal = lo; s.maxVal = hi;
 
@@ -22,6 +76,25 @@ QString ChartModel::addSeries(const QString &name, const QColor &color, SampleTy
     beginInsertRows({}, row, row);
     { QWriteLocker lk(&m_lock); m_rowIndex.insert(name, m_order.size()); m_data.insert(name, std::move(s)); m_order.append(name); }
     endInsertRows();
+    return name;
+}
+
+QString ChartModel::addDigitalSeries(const QString &bitName, const QColor &color)
+{
+    const QString name = addSeries(bitName, color, SampleType::UInt8);
+    {
+        const auto [minH, maxH] = computeLimits(RowKind::Digital);
+        QWriteLocker lk(&m_lock);
+        auto it = m_data.find(name);
+        if (it != m_data.end()) {
+            it->rowHeight    = minH;   // == maxH, фиксировано
+            it->minRowHeight = minH;
+            it->maxRowHeight = maxH;
+            it->minVal = double(0.0);
+            it->maxVal = double(1.0);
+        }
+    }
+    emit layoutChanged();
     return name;
 }
 
@@ -143,7 +216,14 @@ void ChartModel::setRowHeight(int px)
     px = qMax(30, px);
     if (px == m_defaultRowHeight) return;
     m_defaultRowHeight = px;
-    { QWriteLocker lk(&m_lock); for (auto &s : m_data) s.rowHeight = px; }
+    {
+        QWriteLocker lk(&m_lock);
+        for (auto &s : m_data) {
+            // Фиксированные строки (бит): min==max — не трогаем
+            if (s.minRowHeight > 0 && s.minRowHeight == s.maxRowHeight) continue;
+            s.rowHeight = qBound(s.minRowHeight > 0 ? s.minRowHeight : px, px, px);
+        }
+    }
     emit layoutChanged();
 }
 
@@ -157,14 +237,16 @@ void ChartModel::setHeaderWidth(int px)
 
 void ChartModel::setSeriesRowHeight(const QString &name, int px)
 {
-    px = qMax(30, px);
     int row = -1;
     {
         QWriteLocker lk(&m_lock);
         auto it = m_data.find(name);
         if (it == m_data.end()) return;
-        if (it->rowHeight == px) return;
-        it->rowHeight = px;
+        const int lo = it->minRowHeight > 0 ? it->minRowHeight : 1;
+        const int hi = it->maxRowHeight < INT_MAX ? it->maxRowHeight : INT_MAX;
+        const int clamped = qBound(lo, px, hi);
+        if (it->rowHeight == clamped) return;
+        it->rowHeight = clamped;
         row = m_rowIndex.value(name, -1);
     }
     if (row >= 0) emit layoutChanged();

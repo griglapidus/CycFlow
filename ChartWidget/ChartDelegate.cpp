@@ -29,8 +29,6 @@ void ChartDelegate::paint(QPainter *p,
     const auto *s = static_cast<const ChartSeries *>(pv.value<const void *>());
 
     p->save();
-    // Расширяем клип по X до полной ширины устройства — фон и сетка рисуются
-    // за пределами данных. По Y оставляем option.rect чтобы не лезть в соседние строки.
     {
         const QRect fullR(0, option.rect.top(),
                           p->device()->width(), option.rect.height());
@@ -121,15 +119,17 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
 }
 
 // ─── Второй проход: линии данных, точки, курсор ───────────────────────────────
-//
-// Вызывается из ChartView::paintEvent (новый QPainter на viewport) после того
-// как все ячейки нарисовали фон. Painter уже переведён в content-координаты.
-// clipXLeft/clipXRight — видимый X в content-координатах.
-// Y не ограничен — линии могут выходить за пределы своей строки.
 
 void ChartDelegate::paintData(QPainter *p, const QRect &cell,
                               const ChartSeries &s, int cursor, float pps,
                               int clipXLeft, int clipXRight) const
+{
+    paintDataImpl(p, cell, s, cursor, pps, clipXLeft, clipXRight);
+}
+
+void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
+                                  const ChartSeries &s, int cursor, float pps,
+                                  int clipXLeft, int clipXRight) const
 {
     const int dataSize = sampleCount(s.data);
     if (dataSize == 0) return;

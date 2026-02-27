@@ -12,6 +12,9 @@ class ChartModel : public QAbstractTableModel
 {
     Q_OBJECT
 public:
+    enum class RowKind { Regular, Timestamp, Digital };
+
+    static constexpr int kDefaultDigitalRowHeight = 24;  // fallback, реальное значение из computeLimits
     enum Roles {
         SeriesPointerRole = Qt::UserRole + 1,
         CursorSampleRole,
@@ -23,6 +26,12 @@ public:
     QString addSeries(const QString &name,
                       const QColor  &color      = Qt::green,
                       SampleType     sampleType = SampleType::Float32);
+
+    /**
+     * @brief Добавляет серию для битового поля с фиксированной высотой строки.
+     * Данные должны быть 0 или 1. Рисуется как обычная ломаная.
+     */
+    QString addDigitalSeries(const QString &bitName, const QColor &color);
 
     template<typename T>
     void appendData(const QString &name, const QVector<T> &samples);

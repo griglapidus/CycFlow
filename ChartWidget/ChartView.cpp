@@ -37,9 +37,6 @@ ChartView::ChartView(QWidget *parent) : QTableView(parent)
         "QScrollBar::handle:vertical { background: #2c3650; border-radius: 4px; min-height: 20px; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         );
-
-
-
 }
 
 void ChartView::setChartModel(ChartModel *model)
@@ -97,8 +94,6 @@ void ChartView::syncColumnWidth()
 void ChartView::setPixelsPerSample(float pps) { if (m_chartModel) m_chartModel->setPixelsPerSample(pps); }
 void ChartView::setRowHeight(int px)          { if (m_chartModel) m_chartModel->setRowHeight(px); }
 
-// ─── Auto / manual Y fit ─────────────────────────────────────────────────────
-
 ChartView::VisibleRange ChartView::visibleRangeForRow(int row) const
 {
     if (!m_chartModel) return {0, 0, false};
@@ -150,10 +145,6 @@ void ChartView::fitYToVisible()
         const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
         const double midVis    = (vr.lo + vr.hi) * 0.5;
         const int rowH  = s->rowHeight - 8;
-        // yOffset must shift the graph so that midVis lands at the cell center.
-        // Rendering: y(V) = centerY + (0.5 - ratio(V)) * chartH * yScale + yOffset
-        // For y(midVis) == centerY:  yOffset = (ratio(midVis) - 0.5) * chartH * yScale
-        //   ratio(midVis) = (midVis - lo) / range  →  (midVis - midGlobal) / range
         const int newOffset = static_cast<int>((midVis - midGlobal) / globalRange * rowH * newScale);
 
         m_chartModel->setSeriesYScale(s->name, newScale);
@@ -232,14 +223,6 @@ void ChartView::onCursorMoved(int sample)
     m_prevCursorSample = sample;
 }
 
-// ─── Events ──────────────────────────────────────────────────────────────────
-
-// ─── paintEvent: двухпроходная отрисовка ──────────────────────────────────────
-//
-// Проход 1: QTableView::paintEvent — делегат рисует фон + сетку каждой ячейки.
-// Проход 2: новый QPainter поверх фона — линии данных без Y-клипа, чтобы
-//           графики с yOffset свободно переходили в соседние строки.
-
 void ChartView::paintEvent(QPaintEvent *event)
 {
     // Проход 1 — фон всех видимых ячеек
@@ -254,10 +237,8 @@ void ChartView::paintEvent(QPaintEvent *event)
     const int   vpW     = viewport()->width();
     const int   vpH     = viewport()->height();
 
-    // Проход 2 — линии данных поверх фона
     QPainter p(viewport());
 
-    // Content-координаты: идентично тому как QTableView переводит painter делегатам
     p.translate(-hscroll, -vscroll);
     p.setClipRect(hscroll, -32768, vpW, 65536);
 
@@ -265,15 +246,20 @@ void ChartView::paintEvent(QPaintEvent *event)
     const int clipXRight = hscroll + vpW;
 
     int rowY = 0;
+    const int visTop    = vscroll;
+    const int visBottom = vscroll + vpH;
+
     for (int r = 0; r < m_chartModel->rowCount(); ++r) {
         const ChartSeries *s = m_chartModel->series(r);
         const int rowH = s ? s->rowHeight : m_chartModel->rowHeight();
 
-        if (s) {
+        if (rowY > visBottom + rowH) break;
+
+        if (s && rowY + rowH > visTop) {
             const int yOff   = s->yOffset;
             const int top    = rowY + qMin(0, yOff) - rowH;
             const int bottom = rowY + rowH + qMax(0, yOff) + rowH;
-            if (bottom >= vscroll && top <= vscroll + vpH) {
+            if (bottom >= visTop && top <= visBottom) {
                 const QRect cell(0, rowY, m_chartModel->chartPixelWidth(), rowH);
                 p.save();
                 m_delegate->paintData(&p, cell, *s, cursor, pps, clipXLeft, clipXRight);
@@ -399,9 +385,6 @@ void ChartView::wheelEvent(QWheelEvent *e)
         const float newPps    = qBound(0.01f, oldPps * factor, 200.f);
         const int dataX     = mouseX + oldScroll;
         const int newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
-        // Атомарное обновление: pps + ширина колонки + скролл в одном кадре.
-        // Без дебаунса — иначе между setPpsQuiet и resizeSection Qt успевает
-        // нарисовать промежуточный кадр со старой колонкой и новым pps.
         m_chartModel->setPpsQuiet(newPps);
         horizontalHeader()->resizeSection(0,
                                           qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps)));
@@ -410,8 +393,6 @@ void ChartView::wheelEvent(QWheelEvent *e)
         m_pendingNewSamples = m_chartModel->maxSampleCount();
         viewport()->update();
         emitVisibleSamplesIfChanged();
-        // Обновляем курсор по фактической позиции мыши —
-        // скролл мог сдвинуться и старый sample больше не соответствует указателю.
         {
             const int mx = viewport()->mapFromGlobal(QCursor::pos()).x();
             m_chartModel->setCursorSample(viewXToSample(mx));
@@ -554,11 +535,6 @@ void ChartView::flushPendingAppend()
     if (m_autoFitY) doAutoFitY();
 }
 
-
-// ─── Операции над выделением ─────────────────────────────────────────────────
-
-// Вспомогательная: content-Y центра строки row
-// Возвращает content-Y верхнего края строки row
 static int rowTopY(ChartModel *model, int row)
 {
     int y = 0;
@@ -569,7 +545,6 @@ static int rowTopY(ChartModel *model, int row)
     return y;
 }
 
-// Возвращает content-Y центра строки row
 static double rowCenterY(ChartModel *model, int row)
 {
     const int top = rowTopY(model, row);
@@ -578,10 +553,6 @@ static double rowCenterY(ChartModel *model, int row)
     return top + rh * 0.5;
 }
 
-// 1. Синхронизировать ФИЗИЧЕСКИЙ масштаб всех выделенных по source.
-//    Физический масштаб = unitsPerPixel = (hi-lo) / (chartH * yScale).
-//    Для каждой серии вычисляем newScale так чтобы её unitsPerPixel
-//    совпал с unitsPerPixel источника.
 void ChartView::syncScale(int sourceRow, const QSet<int> &rows)
 {
     if (!m_chartModel) return;
@@ -592,7 +563,6 @@ void ChartView::syncScale(int sourceRow, const QSet<int> &rows)
     const int    srcChartH = src->rowHeight - 8;
     if (srcRange <= 0 || srcChartH <= 0) return;
 
-    // unitsPerPixel источника
     const double unitsPerPixel = srcRange / (srcChartH * static_cast<double>(src->yScale));
 
     for (int r : rows) {
@@ -602,33 +572,16 @@ void ChartView::syncScale(int sourceRow, const QSet<int> &rows)
         const double range  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
         const int    chartH = s->rowHeight - 8;
         if (range <= 0 || chartH <= 0) continue;
-        // newScale такой чтобы range / (chartH * newScale) == unitsPerPixel
         const float newScale = qBound(0.05f,
                                       static_cast<float>(range / (chartH * unitsPerPixel)), 100.f);
         m_chartModel->setSeriesYScale(s->name, newScale);
     }
 }
 
-// 2. Наложить все выделенные на поле source с общим физическим масштабом.
-//
-// Цель: одинаковый unitsPerPixel для всех серий, каждая в физически
-// корректной позиции (разница средних значений → разница в пикселях).
-//
-// Вывод формул (все координаты в content-пространстве):
-//   y(V) = centerY_r + (0.5 - (V-lo_r)/range_r) * chartH_r * yScale_r + yOffset_r
-//
-// Хотим чтобы y(V) было одинаковым для всех серий при одном V.
-// Выбираем общий масштаб K = chartH_src * fillFactor / combinedRange,
-// тогда:
-//   yScale_r   = K * range_r / chartH_r
-//   yOffset_r  = K * (globalMid - mid_r) + (centerY_src - centerY_r)
-//
-// где centerY_r = rowTop(r) + rowH_r/2  (content-координаты)
 void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
 {
     if (!m_chartModel) return;
 
-    // Собираем глобальный диапазон по всем выделенным сериям
     double globalLo =  1e300, globalHi = -1e300;
     for (int r : rows) {
         const ChartSeries *s = m_chartModel->series(r);
@@ -646,11 +599,9 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
     const int srcChartH = srcS->rowHeight - 8;
     if (srcChartH <= 0) return;
 
-    // K: unitsPerPixel-1 общего масштаба (combinedRange занимает 85% высоты ячейки source)
     constexpr double fillFactor = 0.85;
     const double K = srcChartH * fillFactor / combinedRange;
 
-    // centerY источника в content-координатах
     const double srcCenterY = rowCenterY(m_chartModel, sourceRow);
 
     for (int r : rows) {
@@ -661,17 +612,13 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
         const int    chartH = s->rowHeight - 8;
         if (range <= 0 || chartH <= 0) continue;
 
-        // Физически корректный yScale: те же units/pixel что у общего масштаба
         const float newScale = qBound(0.05f,
                                       static_cast<float>(K * range / chartH), 100.f);
 
-        // centerY этой серии в content-координатах
         const double sCenterY = rowCenterY(m_chartModel, r);
 
         const double mid = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
 
-        // Смещение: разница средних в физических единицах → пиксели +
-        // компенсация разности centerY строк
         const int newOffset = static_cast<int>(
             K * (globalMid - mid) + (srcCenterY - sCenterY));
 
@@ -679,7 +626,6 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
         m_chartModel->setSeriesYOffset(s->name, newOffset);
     }
 
-    // Подстраиваем и саму source-серию под общий масштаб
     {
         const double range  = boundsToDouble(srcS->maxVal) - boundsToDouble(srcS->minVal);
         const int    chartH = srcChartH;
@@ -694,7 +640,6 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
     }
 }
 
-// 3. Сбросить параметры выделенных
 void ChartView::resetSelected(const QSet<int> &rows)
 {
     if (!m_chartModel) return;

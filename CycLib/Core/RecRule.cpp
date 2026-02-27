@@ -5,8 +5,8 @@
 #include "PReg.h"
 #include <cstring>
 #include <numeric>
-#include <algorithm>
 #include <sstream>
+#include <stdexcept>
 
 namespace cyc {
 
@@ -18,6 +18,7 @@ RecRule::RecRule(const std::vector<PAttr>& inputAttrs) {
 // ---------------------------------------------------------------------------
 void RecRule::init(const std::vector<PAttr>& inputAttrs) {
     m_attrs.clear();
+    m_bitCache.clear();
     size_t tempSize = 0;
 
     buildHeader();
@@ -35,38 +36,40 @@ void RecRule::init(const std::vector<PAttr>& inputAttrs) {
     }
 
     // -----------------------------------------------------------------------
-    // Determine maximum PReg ID across all attributes AND all bit field IDs
+    // Build plain-field caches (flat vectors indexed by PReg ID).
+    // Only plain field IDs are included — bit IDs go into m_bitCache.
     // -----------------------------------------------------------------------
-    int maxId = 0;
+    int maxFieldId = 0;
     for (const auto& attr : m_attrs) {
-        if (attr.id > maxId) maxId = attr.id;
-        for (int bid : attr.bitIds) {
-            if (bid > maxId) maxId = bid;
-        }
+        if (attr.id > maxFieldId) maxFieldId = attr.id;
     }
 
-    // -----------------------------------------------------------------------
-    // Build flat caches (indexed by PReg ID)
-    // -----------------------------------------------------------------------
-    m_offsetCache.assign(maxId + 1, static_cast<size_t>(-1));
-    m_typeCache  .assign(maxId + 1, DataType::dtUndefine);
-    m_bitCache   .assign(maxId + 1, BitRef{0, 0});
+    m_offsetCache.assign(maxFieldId + 1, static_cast<size_t>(-1));
+    m_typeCache  .assign(maxFieldId + 1, DataType::dtUndefine);
 
     for (const auto& attr : m_attrs) {
-        // Cache for the containing integer / field itself
-        if (attr.id > 0 && attr.id <= maxId) {
+        if (attr.id > 0 && attr.id <= maxFieldId) {
             m_offsetCache[attr.id] = attr.offset;
             m_typeCache  [attr.id] = attr.type;
         }
 
-        // Cache for each named bit inside the field
-        if (attr.hasBitFields()) {
-            for (int bitPos = 0; bitPos < static_cast<int>(attr.bitIds.size()); ++bitPos) {
-                int bid = attr.bitIds[bitPos];
-                if (bid > 0 && bid <= maxId) {
-                    // Store the containing field's PReg ID (not raw offset)
-                    m_bitCache[bid] = BitRef{attr.id, bitPos};
-                }
+        // ── Bit-field cache ─────────────────────────────────────────────
+        if (!attr.hasBitFields()) continue;
+
+        for (int bitPos = 0; bitPos < static_cast<int>(attr.bitIds.size()); ++bitPos) {
+            const int bid = attr.bitIds[bitPos];
+            if (bid == 0) continue;   // reserved/skipped bit
+
+            // Uniqueness check: a named bit must appear in at most one field
+            auto [it, inserted] = m_bitCache.emplace(bid, BitRef{attr.id, bitPos});
+            if (!inserted) {
+                // bid is already registered — determine the conflicting field name
+                const std::string existingField = PReg::getName(it->second.fieldId);
+                throw std::invalid_argument(
+                    std::string("RecRule::init: bit '") + PReg::getName(bid) +
+                    "' (id=" + std::to_string(bid) + ") is already registered"
+                                                     " in field '" + existingField + "'."
+                                      " Bit PReg IDs must be unique across the entire RecRule.");
             }
         }
     }
@@ -111,10 +114,8 @@ DataType RecRule::getType(int id) const {
 
 // ---------------------------------------------------------------------------
 BitRef RecRule::getBitRef(int id) const {
-    if (id > 0 && id < static_cast<int>(m_bitCache.size())) {
-        return m_bitCache[id];   // fieldId == 0 means "not a named bit"
-    }
-    return BitRef{0, 0};
+    const auto it = m_bitCache.find(id);
+    return (it != m_bitCache.end()) ? it->second : BitRef{0, 0};
 }
 
 // ---------------------------------------------------------------------------
@@ -214,24 +215,30 @@ RecRule RecRule::fromText(const std::string& text) {
 
         DataType type  = dataTypeFromString(parts[1].c_str());
         size_t   count = std::stoul(parts[2]);
-        // parts[3] = offset (ignored – recalculated in init)
+        // parts[3] = offset (ignored — recalculated in init)
 
-        if (parts.size() >= 5 && !parts[4].empty()) {
-            // Bit-field attribute: reconstruct bitDefs from comma-separated names
-            // Each column is either a bit name or empty (reserved)
+        if (parts.size() >= 5) {
+            // Bit-field attribute: reconstruct bitDefs from the 5th column.
+            // Format produced by toText: "bitName0,bitName1,4,bitName6,3"
+            //   - string token  → named bit (registered in PReg)
+            //   - numeric token → skip that many bits
+            // Both cases are handled directly by PAttr(name, type, bitDefs).
             std::stringstream        bs(parts[4]);
             std::string              bitCol;
             std::vector<std::string> bitDefs;
 
             while (std::getline(bs, bitCol, ',')) {
-                // Empty column → empty string → PAttr constructor skips 1 bit
                 bitDefs.push_back(bitCol);
             }
 
-            userAttrs.emplace_back(attrName.c_str(), type, bitDefs);
-        } else {
-            userAttrs.emplace_back(attrName.c_str(), type, count);
+            // Only treat as a bit-field attribute if we got at least one token
+            if (!bitDefs.empty()) {
+                userAttrs.emplace_back(attrName.c_str(), type, bitDefs);
+                continue;
+            }
         }
+
+        userAttrs.emplace_back(attrName.c_str(), type, count);
     }
 
     return RecRule(userAttrs);

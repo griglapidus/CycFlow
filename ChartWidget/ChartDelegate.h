@@ -20,8 +20,9 @@ public:
                    int clipXLeft, int clipXRight) const;
 
 private:
-    // Первый проход: фон + сетка + подписи, строго в пределах ячейки.
-    void paintBackground(QPainter *p, const QRect &r, const ChartSeries &s) const;
+    void paintBackground (QPainter *p, const QRect &r, const ChartSeries &s) const;
+    void paintDataImpl (QPainter *p, const QRect &cell, const ChartSeries &s,
+                       int cursor, float pps, int clipXLeft, int clipXRight) const;
 
     ChartModel *m_model;
 };

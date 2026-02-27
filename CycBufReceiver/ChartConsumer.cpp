@@ -1,5 +1,6 @@
 #include "ChartConsumer.h"
 #include "Core/PAttr.h"
+#include "Core/PReg.h"
 #include <QVariant>
 
 ChartConsumer::ChartConsumer(std::shared_ptr<cyc::RecBuffer> buffer, QObject *parent)
@@ -39,26 +40,48 @@ void ChartConsumer::onConsumeStart() {
     int colorIndex = 0;
 
     for (const auto& attr : rule.getAttributes()) {
-        QString baseName = QString::fromStdString(attr.name);
+        const QString baseName = QString::fromStdString(attr.name);
+
+        if (attr.hasBitFields()) {
+            CbfSeriesConfig regCfg;
+            regCfg.name  = baseName;
+            regCfg.color = colors[colorIndex++ % colors.size()];
+            regCfg.type  = mapFieldType(rule.getType(attr.id));
+            regCfg.id    = attr.id;
+            regCfg.index = 0;
+            m_configs.append(regCfg);
+            m_currentBatch.append({regCfg.name, makeSampleBuffer(regCfg.type)});
+
+            for (int bitPos = 0; bitPos < static_cast<int>(attr.bitIds.size()); ++bitPos) {
+                const int bid = attr.bitIds[bitPos];
+                if (bid == 0) continue;
+
+                CbfSeriesConfig bitCfg;
+                bitCfg.name          = QString::fromStdString(cyc::PReg::getName(bid));
+                bitCfg.color         = colors[colorIndex++ % colors.size()];
+                bitCfg.type          = SampleType::UInt8;
+                bitCfg.id            = attr.id;
+                bitCfg.index         = 0;
+                bitCfg.isDigital     = true;
+                bitCfg.bitPregId     = bid;
+                m_configs.append(bitCfg);
+                m_currentBatch.append({bitCfg.name, makeSampleBuffer(SampleType::UInt8)});
+            }
+            continue;
+        }
 
         size_t count = attr.count;
-        if (count == 0) count = 1; // Failsafe
+        if (count == 0) count = 1;
 
-        // Create a distinct series for each element of the array
         for (size_t i = 0; i < count; ++i) {
             CbfSeriesConfig cfg;
-
-            if (count > 1) {
-                cfg.name = QString("%1[%2]").arg(baseName).arg(i);
-            } else {
-                cfg.name = baseName;
-            }
-
+            cfg.name  = (count > 1)
+                           ? QString("%1[%2]").arg(baseName).arg(i)
+                           : baseName;
             cfg.color = colors[colorIndex++ % colors.size()];
-            cfg.type = mapFieldType(rule.getType(attr.id));
-            cfg.id = attr.id;
+            cfg.type  = mapFieldType(rule.getType(attr.id));
+            cfg.id    = attr.id;
             cfg.index = static_cast<int>(i);
-
             m_configs.append(cfg);
             m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
         }
@@ -71,34 +94,25 @@ void ChartConsumer::consumeRecord(const cyc::Record& rec) {
     for (int i = 0; i < m_configs.size(); ++i) {
         const auto& cfg = m_configs[i];
 
+        if (cfg.isDigital) {
+            auto& vec = std::get<QVector<uint8_t>>(m_currentBatch[i].samples);
+            vec.append(rec.getBit(cfg.bitPregId) ? uint8_t(1) : uint8_t(0));
+            continue;
+        }
+
         std::visit([&rec, id = cfg.id, idx = cfg.index](auto& vec) {
             using T = std::decay_t<decltype(vec[0])>;
-
-            // Map the variant's underlying type directly to Record's typed accessors
-            if constexpr (std::is_same_v<T, int8_t>) {
-                vec.append(rec.getInt8(id, idx));
-            } else if constexpr (std::is_same_v<T, uint8_t>) {
-                vec.append(rec.getUInt8(id, idx));
-            } else if constexpr (std::is_same_v<T, int16_t>) {
-                vec.append(rec.getInt16(id, idx));
-            } else if constexpr (std::is_same_v<T, uint16_t>) {
-                vec.append(rec.getUInt16(id, idx));
-            } else if constexpr (std::is_same_v<T, int32_t>) {
-                vec.append(rec.getInt32(id, idx));
-            } else if constexpr (std::is_same_v<T, uint32_t>) {
-                vec.append(rec.getUInt32(id, idx));
-            } else if constexpr (std::is_same_v<T, int64_t>) {
-                vec.append(rec.getInt64(id, idx));
-            } else if constexpr (std::is_same_v<T, uint64_t>) {
-                vec.append(rec.getUInt64(id, idx));
-            } else if constexpr (std::is_same_v<T, float>) {
-                vec.append(rec.getFloat(id, idx));
-            } else if constexpr (std::is_same_v<T, double>) {
-                vec.append(rec.getDouble(id, idx));
-            } else {
-                // Fallback for pointers, booleans, chars
-                vec.append(static_cast<T>(rec.getValue(id, idx)));
-            }
+            if constexpr (std::is_same_v<T, int8_t>)        vec.append(rec.getInt8  (id, idx));
+            else if constexpr (std::is_same_v<T, uint8_t>)  vec.append(rec.getUInt8 (id, idx));
+            else if constexpr (std::is_same_v<T, int16_t>)  vec.append(rec.getInt16 (id, idx));
+            else if constexpr (std::is_same_v<T, uint16_t>) vec.append(rec.getUInt16(id, idx));
+            else if constexpr (std::is_same_v<T, int32_t>)  vec.append(rec.getInt32 (id, idx));
+            else if constexpr (std::is_same_v<T, uint32_t>) vec.append(rec.getUInt32(id, idx));
+            else if constexpr (std::is_same_v<T, int64_t>)  vec.append(rec.getInt64 (id, idx));
+            else if constexpr (std::is_same_v<T, uint64_t>) vec.append(rec.getUInt64(id, idx));
+            else if constexpr (std::is_same_v<T, float>)    vec.append(rec.getFloat (id, idx));
+            else if constexpr (std::is_same_v<T, double>)   vec.append(rec.getDouble(id, idx));
+            else vec.append(static_cast<T>(rec.getValue(id, idx)));
         }, m_currentBatch[i].samples);
     }
 

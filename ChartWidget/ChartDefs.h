@@ -148,7 +148,9 @@ struct ChartSeries {
     BoundsValue  maxVal   = double(-DBL_MAX);
 
     // ── Параметры отображения ─────────────────────────────────────────────
-    int   rowHeight = 90;
+    int   rowHeight    = 90;
+    int   minRowHeight = 0;          ///< Нижний порог resize (0 = без ограничения)
+    int   maxRowHeight = INT_MAX;    ///< Верхний порог resize (INT_MAX = без ограничения)
     float yScale    = 1.0f;
     int   yOffset   = 0;
 };

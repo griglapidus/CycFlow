@@ -367,6 +367,24 @@ TEST(BitFieldTest, BitFieldsAlongsidePlainFields) {
     EXPECT_EQ   (rec.getInt32(idPlain), static_cast<int32_t>(0xDEADBEEF));
 }
 
+// Verifies that constructing a RecRule with the same bit name in two different
+// fields throws std::invalid_argument.
+TEST(BitFieldTest, DuplicateBitAcrossFieldsThrows) {
+    // "dup" appears in both SR_A and SR_B — must throw on RecRule construction
+    PAttr srA("SR_A", DataType::dtUInt8,  std::vector<std::string>{"dup", "other_a"});
+    PAttr srB("SR_B", DataType::dtUInt8,  std::vector<std::string>{"other_b", "dup"});
+
+    EXPECT_THROW(RecRule({srA, srB}), std::invalid_argument);
+}
+
+// Verifies that constructing a RecRule with unique bit names does not throw.
+TEST(BitFieldTest, UniqueBitsAcrossFieldsDoNotThrow) {
+    PAttr srA("SR_X", DataType::dtUInt8, std::vector<std::string>{"xa","xb"});
+    PAttr srB("SR_Y", DataType::dtUInt8, std::vector<std::string>{"ya","yb"});
+
+    EXPECT_NO_THROW(RecRule({srA, srB}));
+}
+
 // Verifies that looking up an ID that belongs to a plain field returns an invalid BitRef.
 TEST(BitFieldTest, LookupOfPlainFieldIdReturnsBadRef) {
     PAttr plain("PlainQ", DataType::dtInt32, 1);

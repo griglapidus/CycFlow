@@ -22,6 +22,8 @@ int main() {
         // 1. Prepare Schema with explicit IDs
         std::vector<PAttr> attrs;
         attrs.push_back(PAttr("Counter",  DataType::dtInt8,   2));
+        attrs.push_back(PAttr("BitReg",  DataType::dtUInt8,
+                              std::vector<std::string>{"f0","f1","f2","f3","f4","f5","f6","f7"}));
         attrs.push_back(PAttr("Voltage",  DataType::dtFloat,  1));
         attrs.push_back(PAttr("Current",  DataType::dtFloat,  1));
         attrs.push_back(PAttr("ADC ch0",  DataType::dtInt16,  1));
@@ -35,6 +37,14 @@ int main() {
         int idCurrent = PReg::getID("Current");
         int idAdc     = PReg::getID("ADC ch0");
         int idPres    = PReg::getID("Pressure");
+        int idI0 = PReg::getID("f0");
+        int idI1 = PReg::getID("f1");
+        int idI2 = PReg::getID("f2");
+        int idI3 = PReg::getID("f3");
+        int idI4 = PReg::getID("f4");
+        int idI5 = PReg::getID("f5");
+        int idI6 = PReg::getID("f6");
+        int idI7 = PReg::getID("f7");
 
         // 2. Create Ring Buffer and Writer
         auto buffer = std::make_shared<RecBuffer>(rule, 10000);
@@ -71,6 +81,15 @@ int main() {
                 int16_t adcVal    = static_cast<int16_t>(std::sin((tick + i) * 0.02f) * 5000.0f + 500.0f);
                 double pVal       = 101.3 + 1.2 * std::sin((tick + i) * 0.03);
 
+                bool b0 = ((tick + i) & (1 << 0)) != 0;
+                bool b1 = ((tick + i) & (1 << 1)) != 0;
+                bool b2 = ((tick + i) & (1 << 2)) != 0;
+                bool b3 = ((tick + i) & (1 << 3)) != 0;
+                bool b4 = ((tick + i) & (1 << 4)) != 0;
+                bool b5 = ((tick + i) & (1 << 5)) != 0;
+                bool b6 = ((tick + i) & (1 << 6)) != 0;
+                bool b7 = ((tick + i) & (1 << 7)) != 0;
+
                 // Use specific setters for performance and type safety
                 rec.setInt8(idCounter, counterVal);
                 rec.setInt8(idCounter, counterVal + 20, 1);
@@ -78,6 +97,14 @@ int main() {
                 rec.setFloat(idCurrent, cVal);
                 rec.setInt16(idAdc, adcVal);
                 rec.setDouble(idPres, pVal);
+                rec.setBit(idI0, b0);
+                rec.setBit(idI1, b1);
+                rec.setBit(idI2, b2);
+                rec.setBit(idI3, b3);
+                rec.setBit(idI4, b4);
+                rec.setBit(idI5, b5);
+                rec.setBit(idI6, b6);
+                rec.setBit(idI7, b7);
 
                 writer.commitRecord();
             }
