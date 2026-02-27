@@ -43,7 +43,7 @@ int main() {
         // 3. Start TCP Server
         uint16_t port = 5000;
         TcpServer server(io_context, port);
-        server.registerBuffer("Buffer_1", buffer);
+        server.registerBuffer("Buffer_1", buffer, 500);
         server.start();
 
         // Start ASIO event loop in a background thread with a work guard

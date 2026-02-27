@@ -11,6 +11,7 @@ RecordProducer::RecordProducer(size_t bufferCapacity, size_t writerBatchSize)
     , m_running(false)
     , m_isInitialized(false)
 {
+    m_writerBatchSize = std::min(std::max(m_writerBatchSize, m_bufferCapacity / 20), m_bufferCapacity);
 }
 
 RecordProducer::~RecordProducer() {

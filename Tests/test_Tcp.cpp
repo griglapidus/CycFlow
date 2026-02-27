@@ -43,8 +43,8 @@ protected:
         m_bufferB = std::make_shared<RecBuffer>(m_rule, 100);
 
         m_server = std::make_unique<TcpServer>(m_ioContext, m_port);
-        m_server->registerBuffer("BufferA", m_bufferA);
-        m_server->registerBuffer("BufferB", m_bufferB);
+        m_server->registerBuffer("BufferA", m_bufferA, 50);
+        m_server->registerBuffer("BufferB", m_bufferB, 50);
         m_server->start();
 
         m_serverThread = std::thread([this]() {
@@ -114,7 +114,7 @@ protected:
         m_sourceBuffer = std::make_shared<RecBuffer>(m_rule, 1000);
 
         m_server = std::make_unique<TcpServer>(m_ioContext, m_port);
-        m_server->registerBuffer(m_bufferName, m_sourceBuffer);
+        m_server->registerBuffer(m_bufferName, m_sourceBuffer, 200);
         m_server->start();
 
         m_serverThread = std::thread([this]() {

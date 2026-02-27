@@ -8,9 +8,8 @@ namespace cyc {
 RecordConsumer::RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize)
     : m_running(false)
 {
-    if(readerBatchSize == 0) {
-        readerBatchSize = buffer->capacity() / 2;
-    }
+    readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20), buffer->capacity());
+
     m_reader = std::make_unique<RecordReader>(buffer, readerBatchSize);
 }
 

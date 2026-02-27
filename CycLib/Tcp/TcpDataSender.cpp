@@ -7,8 +7,8 @@
 
 namespace cyc {
 
-TcpDataSender::TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket)
-    : RecordConsumer(buffer)
+TcpDataSender::TcpDataSender(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize, asio::ip::tcp::socket socket)
+    : RecordConsumer(buffer, readerBatchSize)
     , m_socket(std::move(socket))
 {
 }

@@ -19,7 +19,7 @@ namespace cyc {
  */
 class CYCLIB_EXPORT TcpDataSender : public RecordConsumer {
 public:
-    TcpDataSender(std::shared_ptr<RecBuffer> buffer, asio::ip::tcp::socket socket);
+    TcpDataSender(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize, asio::ip::tcp::socket socket);
     ~TcpDataSender() override;
 
 protected:

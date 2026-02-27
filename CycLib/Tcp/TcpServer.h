@@ -27,7 +27,7 @@ public:
      * @param name Unique name of the buffer.
      * @param buffer Shared pointer to the RecBuffer.
      */
-    void registerBuffer(const std::string& name, std::shared_ptr<RecBuffer> buffer);
+    void registerBuffer(const std::string& name, std::shared_ptr<RecBuffer> buffer, size_t batchSize);
     void start();
 
 private:
@@ -38,7 +38,7 @@ private:
 private:
     asio::ip::tcp::acceptor m_acceptor;
 
-    std::unordered_map<std::string, std::shared_ptr<RecBuffer>> m_buffers;
+    std::unordered_map<std::string, std::pair<std::shared_ptr<RecBuffer>, size_t>> m_buffers;
     std::shared_mutex m_buffersMtx;
 
     std::vector<std::shared_ptr<TcpDataSender>> m_activeSenders;

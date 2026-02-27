@@ -16,9 +16,9 @@ TcpServer::TcpServer(asio::io_context& io_context, uint16_t port)
 {
 }
 
-void TcpServer::registerBuffer(const std::string& name, std::shared_ptr<RecBuffer> buffer) {
+void TcpServer::registerBuffer(const std::string& name, std::shared_ptr<RecBuffer> buffer, size_t batchSize) {
     std::unique_lock<std::shared_mutex> lock(m_buffersMtx);
-    m_buffers[name] = buffer;
+    m_buffers[name] = std::make_pair(buffer,batchSize);
 }
 
 void TcpServer::start() {
@@ -65,7 +65,7 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                 std::shared_lock<std::shared_mutex> lock(m_buffersMtx);
                 auto it = m_buffers.find(bufferName);
                 if (it != m_buffers.end()) {
-                    targetBuffer = it->second;
+                    targetBuffer = it->second.first;
                 }
             }
 
@@ -81,11 +81,13 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
         case MessageType::RequestDataStream: {
             std::string bufferName(payload.begin(), payload.end());
             std::shared_ptr<RecBuffer> targetBuffer;
+            size_t batchSize = 0;
             {
                 std::shared_lock<std::shared_mutex> lock(m_buffersMtx);
                 auto it = m_buffers.find(bufferName);
                 if (it != m_buffers.end()) {
-                    targetBuffer = it->second;
+                    targetBuffer = it->second.first;
+                    batchSize = it->second.second;
                 }
             }
 
@@ -101,6 +103,7 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                 // Handover the socket to a new TcpDataSender session
                 auto sender = std::make_shared<TcpDataSender>(
                     targetBuffer,
+                    batchSize,
                     std::move(socket)
                 );
 
