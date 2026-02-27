@@ -140,12 +140,13 @@ void ChartView::fitYToVisible()
         const double visibleRange = vr.hi - vr.lo;
         if (globalRange <= 0 || visibleRange <= 0) continue;
 
-        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange), 50.f);
+        const float newScale = qMax(0.1f, static_cast<float>(globalRange / visibleRange));
 
         const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
         const double midVis    = (vr.lo + vr.hi) * 0.5;
-        const int rowH  = s->rowHeight - 8;
-        const int newOffset = static_cast<int>((midVis - midGlobal) / globalRange * rowH * newScale);
+        const int    rowH      = s->rowHeight - 8;
+        const double rawOffset = (midVis - midGlobal) / globalRange * rowH * newScale;
+        const int    newOffset = static_cast<int>(qBound(-1e7, rawOffset, 1e7));
 
         m_chartModel->setSeriesYScale(s->name, newScale);
         m_chartModel->setSeriesYOffset(s->name, newOffset);
@@ -177,11 +178,12 @@ void ChartView::doAutoFitY()
         const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
         const double visibleRange = vr.hi - vr.lo;
         if (globalRange <= 0 || visibleRange <= 0) continue;
-        const float newScale = qBound(0.1f, static_cast<float>(globalRange / visibleRange), 50.f);
+        const float newScale = qMax(0.1f, static_cast<float>(globalRange / visibleRange));
         const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
         const double midVis    = (vr.lo + vr.hi) * 0.5;
-        const int rowH  = s->rowHeight - 8;
-        const int newOffset = static_cast<int>((midVis - midGlobal) / globalRange * rowH * newScale);
+        const int rowH = s->rowHeight - 8;
+        const double rawOffset = (midVis - midGlobal) / globalRange * rowH * newScale;
+        const int newOffset = static_cast<int>(qBound(-1e7, rawOffset, 1e7));
         m_chartModel->setSeriesYScale(s->name, newScale);
         m_chartModel->setSeriesYOffset(s->name, newOffset);
     }

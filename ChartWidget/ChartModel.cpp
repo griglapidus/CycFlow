@@ -254,7 +254,7 @@ void ChartModel::setSeriesRowHeight(const QString &name, int px)
 
 void ChartModel::setSeriesYScale(const QString &name, float scale)
 {
-    scale = qBound(0.05f, scale, 100.f);
+    scale = qMax(0.05f, scale);
     int row = -1;
     {
         QWriteLocker lk(&m_lock);

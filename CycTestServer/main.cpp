@@ -92,7 +92,7 @@ int main() {
 
                 // Use specific setters for performance and type safety
                 rec.setInt8(idCounter, counterVal);
-                rec.setInt8(idCounter, counterVal + 20, 1);
+                rec.setInt8(idCounter, counterVal + 128, 1);
                 rec.setFloat(idVoltage, vVal);
                 rec.setFloat(idCurrent, cVal);
                 rec.setInt16(idAdc, adcVal);
