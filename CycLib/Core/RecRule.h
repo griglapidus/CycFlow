@@ -7,17 +7,39 @@
 #include "PAttr.h"
 #include <string>
 #include <vector>
+#include <cstddef>
 
 namespace cyc {
+
+/**
+ * @struct BitRef
+ * @brief Describes the location of a named bit in terms of its *containing field*.
+ *
+ * The cache is indexed by the bit's own PReg ID and stores:
+ *  - `fieldId`  — PReg ID of the integer PAttr that owns this bit.
+ *                 Using this ID with `getOffsetById` / `getType` gives the full
+ *                 field descriptor (offset, type, count) with the same O(1) cost.
+ *  - `bitPos`   — zero-based bit index within that field (0 = LSB of element 0).
+ *
+ * Keeping `fieldId` rather than a raw byte offset makes the cache self-describing:
+ * you can always reconstruct "who owns this bit" without a reverse lookup.
+ */
+struct BitRef {
+    int fieldId;  ///< PReg ID of the containing integer field (0 = not a bit field).
+    int bitPos;   ///< Bit index within the integer element (0 = LSB).
+};
 
 /**
  * @class RecRule
  * @brief Defines the memory layout and schema of a record.
  *
- * This class manages a collection of attributes (`PAttr`), calculates their
- * byte offsets within a contiguous memory block, and caches these offsets
- * and types in flat arrays for O(1) runtime lookups. This ensures extremely
- * fast access to record fields during data processing.
+ * Manages a collection of attributes (`PAttr`), calculates their byte offsets,
+ * and caches offsets, types, and bit-field locations in flat arrays for O(1)
+ * runtime lookups.
+ *
+ * Bit fields are supported via `PAttr` instances constructed with a `bitDefs`
+ * vector.  After schema construction `getOffsetById` / `getType` work for the
+ * *containing integer* field, while `getBitRef` resolves individual named bits.
  */
 class CYCLIB_EXPORT RecRule {
 public:
@@ -28,18 +50,18 @@ public:
 
     /**
      * @brief Constructs a rule from a provided list of attributes.
-     * @param inputAttrs A vector containing the user-defined attributes.
+     * @param inputAttrs User-defined attributes (plain or bit-field).
      */
     explicit RecRule(const std::vector<PAttr>& inputAttrs);
 
     /**
-     * @brief Initializes the rule, builds headers, and constructs O(1) caches.
-     * @param inputAttrs A vector containing the user-defined attributes.
+     * @brief Initialises the rule, builds headers and all O(1) caches.
+     * @param inputAttrs User-defined attributes.
      */
     void init(const std::vector<PAttr>& inputAttrs);
 
     /**
-     * @brief Builds internal system header attributes (e.g., TimeStamp).
+     * @brief Builds internal system header attributes (e.g. TimeStamp).
      */
     void buildHeader();
 
@@ -50,53 +72,78 @@ public:
     [[nodiscard]] size_t getRecSize() const;
 
     /**
-     * @brief Gets the memory offset of an attribute by its sequential index.
-     * @param index The index of the attribute in the internal list.
-     * @return The offset in bytes from the beginning of the record.
+     * @brief Gets the byte offset of an attribute by sequential index.
+     * @param index Index in the internal attribute list.
+     * @return Offset in bytes.
      */
     [[nodiscard]] size_t getOffsetByIndex(size_t index) const;
 
     /**
-     * @brief Gets the memory offset of an attribute by its unique registry ID.
-     * @note Uses a flat array cache to guarantee O(1) performance.
-     * @param id The unique ID of the attribute (obtained from PReg).
-     * @return The offset in bytes, or 0 if the ID is invalid.
+     * @brief Gets the byte offset of an attribute by its PReg ID.
+     * @note O(1) flat-array lookup.
+     * @param id PReg ID of the attribute.
+     * @return Offset in bytes, or 0 if the ID is invalid.
      */
     [[nodiscard]] size_t getOffsetById(int id) const;
 
     /**
-     * @brief Gets the data type of an attribute by its unique registry ID.
-     * @note Uses a flat array cache to guarantee O(1) performance.
-     * @param id The unique ID of the attribute.
-     * @return The DataType of the attribute. Returns dtVoid if invalid.
+     * @brief Gets the data type of an attribute by its PReg ID.
+     * @note O(1) flat-array lookup.
+     * @param id PReg ID of the attribute.
+     * @return DataType, or dtVoid if invalid.
      */
     [[nodiscard]] DataType getType(int id) const;
 
     /**
-     * @brief Retrieves the complete list of attributes, including system headers.
-     * @return A constant reference to the vector of attributes.
+     * @brief Returns the BitRef for a named bit by its PReg ID.
+     *
+     * The returned struct contains:
+     *  - `fieldId` — PReg ID of the containing integer field.
+     *                Pass it to `getOffsetById` / `getType` for full field info.
+     *  - `bitPos`  — zero-based bit index within that field (0 = LSB).
+     *
+     * @param id  PReg ID of the named bit (registered via PAttr's bitDefs).
+     * @return    A valid BitRef on success (fieldId > 0).
+     *            Returns {0, 0} if id does not refer to a known named bit.
+     */
+    [[nodiscard]] BitRef getBitRef(int id) const;
+
+    /**
+     * @brief Retrieves the complete attribute list, including system headers.
+     * @return Const reference to the attribute vector.
      */
     [[nodiscard]] const std::vector<PAttr>& getAttributes() const;
 
     /**
-     * @brief Serializes the schema to a delimited text string.
-     * @return A string representation of the schema.
+     * @brief Serialises the schema to a delimited text string.
+     *
+     * Each line has the form:
+     *   `name;Type;count;offset[;bitField0,bitField1,...]\n`
+     * Bit-field columns are present only for attributes that define bit fields.
+     * Each column is either the named bit's string name or empty (reserved bit).
+     *
+     * @return Multi-line string representation.
      */
     [[nodiscard]] std::string toText() const;
 
     /**
-     * @brief Deserializes a schema from a text string.
-     * @param text The string representation of the schema.
-     * @return A constructed RecRule object.
+     * @brief Deserialises a schema previously produced by `toText`.
+     * @param text Serialised schema string.
+     * @return Reconstructed RecRule.
      */
     static RecRule fromText(const std::string& text);
 
 private:
-    std::vector<PAttr> m_headerAttrs;
-    std::vector<PAttr> m_attrs;
+    std::vector<PAttr>     m_headerAttrs;
+    std::vector<PAttr>     m_attrs;
 
-    std::vector<size_t> m_offsetCache;
-    std::vector<DataType> m_typeCache;
+    // --- O(1) caches indexed by PReg ID ---
+    std::vector<size_t>    m_offsetCache;   ///< Byte offset of the containing field.
+    std::vector<DataType>  m_typeCache;     ///< DataType of the containing field.
+
+    /// Bit-field cache, indexed by PReg bit ID.
+    /// Valid entry: fieldId > 0.  Invalid (not a bit): fieldId == 0.
+    std::vector<BitRef>    m_bitCache;
 };
 
 } // namespace cyc
