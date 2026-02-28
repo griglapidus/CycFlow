@@ -6,7 +6,6 @@
 #include <QWheelEvent>
 #include <QKeyEvent>
 #include <QResizeEvent>
-#include <QContextMenuEvent>
 #include <QPaintEvent>
 #include <QScrollBar>
 #include <QMenu>
@@ -276,6 +275,15 @@ void ChartView::mousePressEvent(QMouseEvent *e)
 {
     if (!m_chartModel) { e->accept(); return; }
 
+    if (e->button() == Qt::RightButton) {
+        m_panning        = true;
+        m_panStartX      = e->pos().x();
+        m_panStartScroll = horizontalScrollBar()->value();
+        setCursor(Qt::ClosedHandCursor);
+        e->accept();
+        return;
+    }
+
     if (e->button() == Qt::LeftButton) {
         const int row = viewYToRow(e->pos().y());
         if (row >= 0) {
@@ -296,6 +304,13 @@ void ChartView::mouseMoveEvent(QMouseEvent *e)
 {
     if (!m_chartModel) { e->accept(); return; }
 
+    if (m_panning && (e->buttons() & Qt::RightButton)) {
+        const int delta = e->pos().x() - m_panStartX;
+        horizontalScrollBar()->setValue(m_panStartScroll - delta);
+        e->accept();
+        return;
+    }
+
     if (m_dragging && (e->buttons() & Qt::LeftButton)) {
         const int delta  = e->pos().y() - m_dragStartY;
         const int newOff = m_dragStartOffset + delta;
@@ -314,48 +329,17 @@ void ChartView::mouseMoveEvent(QMouseEvent *e)
 
 void ChartView::mouseReleaseEvent(QMouseEvent *e)
 {
+    if (m_panning && e->button() == Qt::RightButton) {
+        m_panning = false;
+        unsetCursor();
+        e->accept();
+        return;
+    }
     if (m_dragging) {
         m_dragging = false;
         unsetCursor();
     }
     e->accept();
-}
-
-void ChartView::contextMenuEvent(QContextMenuEvent *e)
-{
-    if (!m_chartModel) return;
-
-    QMenu menu(this);
-    menu.setStyleSheet(
-        "QMenu { background:#0f1219; color:#aabbcc; border:1px solid #1e2538; font:9pt 'Consolas'; }"
-        "QMenu::item:selected { background:#1a2540; }"
-        "QMenu::separator { height:1px; background:#1e2538; margin:3px 8px; }"
-        );
-
-    QAction *actAutoFit = menu.addAction(u8"Авто-подстройка Y по видимому фрагменту");
-    actAutoFit->setCheckable(true);
-    actAutoFit->setChecked(m_autoFitY);
-    connect(actAutoFit, &QAction::triggered, this, &ChartView::toggleAutoFitY);
-
-    QAction *actOneFit = menu.addAction(u8"Подогнать Y под видимый фрагмент");
-    connect(actOneFit, &QAction::triggered, this, &ChartView::fitYToVisible);
-
-    const int row = viewYToRow(e->pos().y());
-    const ChartSeries *s = (row >= 0) ? m_chartModel->series(row) : nullptr;
-    if (s) {
-        QAction *actReset = menu.addAction(
-            QString(u8"Сбросить вид '%1'").arg(s->name));
-        const QString name = s->name;
-        connect(actReset, &QAction::triggered, this, [this, name]() {
-            m_chartModel->setSeriesYScale(name, 1.0f);
-            m_chartModel->setSeriesYOffset(name, 0);
-        });
-    }
-
-    QAction *actResetAll = menu.addAction(u8"Сбросить вид всех графиков");
-    connect(actResetAll, &QAction::triggered, m_chartModel, &ChartModel::resetAllDisplayParams);
-
-    menu.exec(e->globalPos());
 }
 
 void ChartView::leaveEvent(QEvent *e)
@@ -376,6 +360,7 @@ void ChartView::wheelEvent(QWheelEvent *e)
         const float factor = (delta > 0) ? 1.15f : (1.0f / 1.15f);
         m_chartModel->setRowHeight(static_cast<int>(m_chartModel->rowHeight() * factor));
         e->accept();
+        if (m_autoFitY) doAutoFitY();
         return;
     }
 

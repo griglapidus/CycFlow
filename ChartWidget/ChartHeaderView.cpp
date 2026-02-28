@@ -169,63 +169,79 @@ void ChartHeaderView::leaveEvent(QEvent *e)
     QWidget::leaveEvent(e);
 }
 
+void ChartHeaderView::setAutoFitY(bool on) { m_autoFitY = on; }
+
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
 void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
 {
     const int sourceRow = rowAt(e->pos().y());
-    if (sourceRow < 0) return;
 
-    // Убеждаемся что строка под курсором входит в выделение
-    if (!m_selectedRows.contains(sourceRow)) {
+    if (sourceRow >= 0 && !m_selectedRows.contains(sourceRow)) {
         m_selectedRows.clear();
         m_selectedRows.insert(sourceRow);
         update();
     }
 
-    const ChartSeries *src = m_model->series(sourceRow);
-    if (!src) return;
+    const ChartSeries *src = (sourceRow >= 0) ? m_model->series(sourceRow) : nullptr;
 
     QMenu menu(this);
     menu.setStyleSheet(
         "QMenu { background:#0f1219; color:#aabbcc; border:1px solid #1e2538; font:9pt 'Consolas'; }"
         "QMenu::item:selected { background:#1a2540; }"
+        "QMenu::item:disabled { color:#445566; }"
         "QMenu::separator { height:1px; background:#1e2538; margin:3px 8px; }"
         );
 
-    const bool multi = m_selectedRows.size() > 1;
-    const QString srcName = src->name;
+    auto *actAutoFit = menu.addAction(u8"Авто-подстройка Y по видимому фрагменту");
+    actAutoFit->setCheckable(true);
+    actAutoFit->setChecked(m_autoFitY);
+    connect(actAutoFit, &QAction::triggered, this, [this]() {
+        emit autoFitYToggleRequested();
+    });
 
-    if (multi) {
-        // ── Операции над несколькими выделенными ────────────────────────────
-        auto *actSync = menu.addAction(
-            QString(u8"Синхронизировать масштаб по '%1'").arg(srcName));
-        connect(actSync, &QAction::triggered, this, [this, sourceRow]() {
-            emit syncScaleRequested(sourceRow, m_selectedRows);
-        });
-
-        auto *actOverlay = menu.addAction(
-            QString(u8"Наложить на '%1'").arg(srcName));
-        connect(actOverlay, &QAction::triggered, this, [this, sourceRow]() {
-            emit overlayRequested(sourceRow, m_selectedRows);
-        });
-
-        menu.addSeparator();
-
-        auto *actReset = menu.addAction(u8"Сбросить параметры выделенных");
-        connect(actReset, &QAction::triggered, this, [this]() {
-            emit resetSelectedRequested(m_selectedRows);
-        });
-    } else {
-        // ── Одиночное выделение ─────────────────────────────────────────────
-        auto *actReset = menu.addAction(
-            QString(u8"Сбросить вид '%1'").arg(srcName));
-        connect(actReset, &QAction::triggered, this, [this, sourceRow]() {
-            emit resetSelectedRequested({ sourceRow });
-        });
-    }
+    auto *actOneFit = menu.addAction(u8"Подогнать Y под видимый фрагмент");
+    connect(actOneFit, &QAction::triggered, this, [this]() {
+        emit fitYToVisibleRequested();
+    });
 
     menu.addSeparator();
+
+    const bool multi = (m_selectedRows.size() > 1);
+
+    if (src) {
+        const QString srcName = src->name;
+
+        if (multi) {
+            auto *actSync = menu.addAction(
+                QString(u8"Синхронизировать масштаб по '%1'").arg(srcName));
+            connect(actSync, &QAction::triggered, this, [this, sourceRow]() {
+                emit syncScaleRequested(sourceRow, m_selectedRows);
+            });
+
+            auto *actOverlay = menu.addAction(
+                QString(u8"Наложить на '%1'").arg(srcName));
+            connect(actOverlay, &QAction::triggered, this, [this, sourceRow]() {
+                emit overlayRequested(sourceRow, m_selectedRows);
+            });
+
+            menu.addSeparator();
+
+            auto *actReset = menu.addAction(u8"Сбросить параметры выделенных");
+            connect(actReset, &QAction::triggered, this, [this]() {
+                emit resetSelectedRequested(m_selectedRows);
+            });
+        } else {
+            auto *actReset = menu.addAction(
+                QString(u8"Сбросить вид '%1'").arg(srcName));
+            connect(actReset, &QAction::triggered, this, [this, sourceRow]() {
+                emit resetSelectedRequested({ sourceRow });
+            });
+        }
+
+        menu.addSeparator();
+    }
+
     auto *actResetAll = menu.addAction(u8"Сбросить все");
     connect(actResetAll, &QAction::triggered, this, [this]() {
         m_model->resetAllDisplayParams();
@@ -260,6 +276,11 @@ QString ChartHeaderView::formatTimestamp(double epochSec)
            + QString::number(ms).rightJustified(3, QLatin1Char('0'))
            + QStringLiteral(" ")
            + tzStr;
+}
+
+QString ChartHeaderView::formatTimestampLine(double epochSec)
+{
+    return formatTimestamp(epochSec).replace(QLatin1Char('\n'), QLatin1Char(' '));
 }
 
 // ─── Paint ────────────────────────────────────────────────────────────────────

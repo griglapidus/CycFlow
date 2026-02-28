@@ -38,7 +38,6 @@ protected:
     void mouseMoveEvent   (QMouseEvent *e) override;
     void mousePressEvent  (QMouseEvent *e) override;
     void mouseReleaseEvent(QMouseEvent *e) override;
-    void contextMenuEvent (QContextMenuEvent *e) override;
     void leaveEvent       (QEvent      *e) override;
     void wheelEvent       (QWheelEvent *e) override;
     void resizeEvent      (QResizeEvent *e) override;
@@ -75,6 +74,11 @@ private:
     int     m_dragStartY      = 0;
     int     m_dragStartOffset = 0;
     QString m_dragSeriesName;
+
+    // ПКМ — горизонтальный пан
+    bool m_panning         = false;
+    int  m_panStartX       = 0;
+    int  m_panStartScroll  = 0;
 
     bool    m_autoFitY        = false;
 };

@@ -221,7 +221,7 @@ void ChartModel::setRowHeight(int px)
         for (auto &s : m_data) {
             // Фиксированные строки (бит): min==max — не трогаем
             if (s.minRowHeight > 0 && s.minRowHeight == s.maxRowHeight) continue;
-            s.rowHeight = qBound(s.minRowHeight > 0 ? s.minRowHeight : px, px, px);
+            s.rowHeight = qBound(s.minRowHeight > 0 ? s.minRowHeight : px, px, s.maxRowHeight > s.minRowHeight ? s.maxRowHeight : s.minRowHeight + 1);
         }
     }
     emit layoutChanged();
