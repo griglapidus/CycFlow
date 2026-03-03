@@ -3,23 +3,20 @@
 
 #include "ChartModel.h"
 
-#include <QWidget>
+#include <QHeaderView>
 #include <QString>
-#include <QAbstractScrollArea>
 #include <QSet>
 
-class ChartHeaderView : public QWidget
+class ChartHeaderView : public QHeaderView
 {
     Q_OBJECT
 public:
     explicit ChartHeaderView(ChartModel *model, QWidget *parent = nullptr);
 
-    void syncVerticalScroll(QAbstractScrollArea *chartView);
-
     // Текущее выделение
     QSet<int> selectedRows() const { return m_selectedRows; }
 
-    // Форматирование epoch-секунд в читаемую строку (используется также тулбаром)
+    // Форматирование epoch-секунд в читаемую строку
     static QString formatTimestamp(double epochSec);
     // Однострочная версия для тулбара (без \n)
     static QString formatTimestampLine(double epochSec);
@@ -33,22 +30,21 @@ signals:
     void overlayRequested      (int sourceRow, QSet<int> rows);
     void resetSelectedRequested(QSet<int> rows);
 
-    // View-level операции, перенесённые из контекстного меню ChartView
+    // View-level операции
     void fitYToVisibleRequested();
     void autoFitYToggleRequested();
 
 protected:
-    void paintEvent        (QPaintEvent   *) override;
-    void mouseMoveEvent    (QMouseEvent   *) override;
-    void mousePressEvent   (QMouseEvent   *) override;
-    void mouseReleaseEvent (QMouseEvent   *) override;
-    void contextMenuEvent  (QContextMenuEvent *) override;
-    void leaveEvent        (QEvent        *) override;
+    void paintEvent        (QPaintEvent        *e) override;
+    void mouseMoveEvent    (QMouseEvent        *e) override;
+    void mousePressEvent   (QMouseEvent        *e) override;
+    void mouseReleaseEvent (QMouseEvent        *e) override;
+    void contextMenuEvent  (QContextMenuEvent  *e) override;
+    void leaveEvent        (QEvent             *e) override;
 
 private slots:
-    void onCursorMoved    (int sample);
-    void onVerticalScroll (int value);
-    void onLayoutChanged  ();
+    void onCursorMoved  (int sample);
+    void onLayoutChanged();
 
 private:
     void paintRow(QPainter *p, const QRect &r,
@@ -58,12 +54,11 @@ private:
     static constexpr int kHeaderResizeZone = 6;
     static constexpr int kHeaderMinWidth   = 80;
     static constexpr int kHeaderMaxWidth   = 500;
-    int rowAtResizeHandle(int y) const;
-    int rowAt(int y) const;        // строка под указателем (не resize-зона)
-    int rowTop(int row) const;
+
+    int rowAtResizeHandle(int y) const; // строка под resize-ручкой нижнего края
+    int rowAt(int y) const;             // строка под указателем (не resize-зона)
 
     ChartModel *m_model;
-    int         m_scrollOffset = 0;
 
     // Resize строки по вертикали
     bool m_resizing     = false;
@@ -72,15 +67,15 @@ private:
     int  m_resizeStartH = 0;
 
     // Resize ширины заголовка (drag правого края)
-    bool m_headerResizing      = false;
-    int  m_headerResizePressX  = 0;
-    int  m_headerResizeStartW  = 0;
+    bool m_headerResizing     = false;
+    int  m_headerResizePressX = 0;
+    int  m_headerResizeStartW = 0;
 
     // Selection
     QSet<int> m_selectedRows;
-    int       m_lastClickedRow = -1;   // для Shift-клика (на будущее)
+    int       m_lastClickedRow = -1;
 
-    // Зеркало состояния ChartView::m_autoFitY (обновляется через setAutoFitY)
+    // Зеркало состояния ChartView::m_autoFitY
     bool m_autoFitY = false;
 };
 

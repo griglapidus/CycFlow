@@ -23,8 +23,10 @@ ChartView::ChartView(QWidget *parent) : QTableView(parent)
     setSortingEnabled(false);
     setShowGrid(false);
 
+    // Горизонтальный заголовок (сверху) не нужен — скрываем.
+    // Вертикальный заголовок будет заменён ChartHeaderView извне,
+    // поэтому НЕ скрываем его здесь.
     horizontalHeader()->hide();
-    verticalHeader()->hide();
     setCornerButtonEnabled(false);
 
     setStyleSheet(
@@ -48,6 +50,8 @@ void ChartView::setChartModel(ChartModel *model)
     setModel(model);
 
     horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    // Вертикальный заголовок — наш ChartHeaderView (уже установлен до вызова
+    // setChartModel). Устанавливаем Fixed: ресайз секций обрабатывает сам заголовок.
     verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
 
     syncColumnWidth();
@@ -213,6 +217,7 @@ void ChartView::repaintCursorStrip(int oldSample, int newSample)
     const int   scroll = horizontalScrollBar()->value();
     const int   vH     = viewport()->height();
     const int   stripW = qMax(4, static_cast<int>(pps) + 2);
+
     auto toViewX = [&](int s) { return qRound(s * pps) - scroll; };
     if (oldSample >= 0) viewport()->update(QRect(toViewX(oldSample) - stripW/2, 0, stripW, vH));
     if (newSample >= 0) viewport()->update(QRect(toViewX(newSample) - stripW/2, 0, stripW, vH));
@@ -370,8 +375,8 @@ void ChartView::wheelEvent(QWheelEvent *e)
         const int   oldScroll = horizontalScrollBar()->value();
         const float oldPps    = m_chartModel->pixelsPerSample();
         const float newPps    = qBound(0.01f, oldPps * factor, 200.f);
-        const int dataX     = mouseX + oldScroll;
-        const int newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
+        const int   dataX     = mouseX + oldScroll;
+        const int   newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
         m_chartModel->setPpsQuiet(newPps);
         horizontalHeader()->resizeSection(0,
                                           qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps)));
@@ -603,9 +608,7 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
                                       static_cast<float>(K * range / chartH), 100.f);
 
         const double sCenterY = rowCenterY(m_chartModel, r);
-
         const double mid = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
-
         const int newOffset = static_cast<int>(
             K * (globalMid - mid) + (srcCenterY - sCenterY));
 

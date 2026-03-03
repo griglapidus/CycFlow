@@ -4,72 +4,59 @@
 #include <QDateTime>
 #include <QMouseEvent>
 #include <QContextMenuEvent>
-#include <QScrollBar>
 #include <QMenu>
 #include <QAction>
 #include <QTimeZone>
 
 ChartHeaderView::ChartHeaderView(ChartModel *model, QWidget *parent)
-    : QWidget(parent), m_model(model)
+    : QHeaderView(Qt::Vertical, parent), m_model(model)
 {
-    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    setFixedWidth(model->headerWidth());
+    // Запрещаем встроенный Qt-ресайз секций — обрабатываем сами
+    setSectionResizeMode(QHeaderView::Fixed);
+    // Убираем выделение секций Qt — используем собственную логику
+    setHighlightSections(false);
     setMouseTracking(true);
+    setFixedWidth(model->headerWidth());
 
     connect(model, &ChartModel::cursorMoved,
             this,  &ChartHeaderView::onCursorMoved);
     connect(model, &ChartModel::layoutChanged,
             this,  &ChartHeaderView::onLayoutChanged);
     connect(model, &ChartModel::rowsInserted,
-            this,  [this]() { update(); });
+            this,  [this]() { viewport()->update(); });
 }
 
-void ChartHeaderView::syncVerticalScroll(QAbstractScrollArea *chartView)
+void ChartHeaderView::onCursorMoved(int) { viewport()->update(); }
+
+void ChartHeaderView::onLayoutChanged()
 {
-    connect(chartView->verticalScrollBar(), &QScrollBar::valueChanged,
-            this, &ChartHeaderView::onVerticalScroll);
+    setFixedWidth(m_model->headerWidth());
+    viewport()->update();
 }
-
-void ChartHeaderView::onCursorMoved(int) { update(); }
-void ChartHeaderView::onVerticalScroll(int value) { m_scrollOffset = value; update(); }
-void ChartHeaderView::onLayoutChanged() { setFixedWidth(m_model->headerWidth()); update(); }
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────────
-
-int ChartHeaderView::rowTop(int row) const
-{
-    int y = 0;
-    for (int i = 0; i < row; ++i) {
-        const ChartSeries *s = m_model->series(i);
-        y += s ? s->rowHeight : m_model->rowHeight();
-    }
-    return y;
-}
+// sectionViewportPosition(r) возвращает y строки r в координатах viewport
+// (уже учитывает scroll), что заменяет старый rowTop(r) - m_scrollOffset.
 
 int ChartHeaderView::rowAtResizeHandle(int y) const
 {
     for (int r = 0; r < m_model->rowCount(); ++r) {
         const ChartSeries *s = m_model->series(r);
-        const int rh  = s ? s->rowHeight : m_model->rowHeight();
-        const int bot = rowTop(r) - m_scrollOffset + rh;
-        if (std::abs(y - bot) <= kResizeZone) {
-            // Фиксированные строки нельзя ресайзить
-            if (s && s->minRowHeight > 0 && s->minRowHeight == s->maxRowHeight) return -1;
+        // Фиксированные строки нельзя ресайзить
+        if (s && s->minRowHeight > 0 && s->minRowHeight == s->maxRowHeight)
+            continue;
+        const int rh  = sectionSize(r);
+        const int bot = sectionViewportPosition(r) + rh;
+        if (std::abs(y - bot) <= kResizeZone)
             return r;
-        }
     }
     return -1;
 }
 
 int ChartHeaderView::rowAt(int y) const
 {
-    for (int r = 0; r < m_model->rowCount(); ++r) {
-        const ChartSeries *s = m_model->series(r);
-        const int rh  = s ? s->rowHeight : m_model->rowHeight();
-        const int top = rowTop(r) - m_scrollOffset;
-        if (y >= top && y < top + rh) return r;
-    }
-    return -1;
+    // logicalIndexAt учитывает scroll внутри QHeaderView
+    return logicalIndexAt(y);
 }
 
 // ─── Mouse ────────────────────────────────────────────────────────────────────
@@ -79,38 +66,37 @@ void ChartHeaderView::mousePressEvent(QMouseEvent *e)
     if (e->button() == Qt::LeftButton) {
 
         // ── Resize ширины заголовка (правый край) ─────────────────────────
-        if (e->pos().x() >= width() - kHeaderResizeZone) {
+        if (e->pos().x() >= viewport()->width() - kHeaderResizeZone) {
             m_headerResizing     = true;
             m_headerResizePressX = e->pos().x();
             m_headerResizeStartW = width();
             setCursor(Qt::SizeHorCursor);
-            e->accept(); return;
+            e->accept();
+            return;
         }
 
         // Resize handle строки имеет приоритет над выделением
         const int resizeRow = rowAtResizeHandle(e->pos().y());
         if (resizeRow >= 0) {
             const ChartSeries *s = m_model->series(resizeRow);
-            m_resizing      = true;
-            m_resizeRow     = resizeRow;
-            m_resizePressY  = e->pos().y();
-            m_resizeStartH  = s ? s->rowHeight : m_model->rowHeight();
+            m_resizing     = true;
+            m_resizeRow    = resizeRow;
+            m_resizePressY = e->pos().y();
+            m_resizeStartH = s ? s->rowHeight : m_model->rowHeight();
             setCursor(Qt::SizeVerCursor);
-            e->accept(); return;
+            e->accept();
+            return;
         }
 
         // Выделение строки
         const int row = rowAt(e->pos().y());
         if (row >= 0) {
             if (e->modifiers() & Qt::ControlModifier) {
-                // Ctrl+клик — toggle строки
                 if (m_selectedRows.contains(row))
                     m_selectedRows.remove(row);
                 else
                     m_selectedRows.insert(row);
             } else {
-                // Простой клик — выделяем только эту строку
-                // (если строка уже единственная выделенная — снимаем)
                 if (m_selectedRows.size() == 1 && m_selectedRows.contains(row))
                     m_selectedRows.clear();
                 else {
@@ -119,10 +105,12 @@ void ChartHeaderView::mousePressEvent(QMouseEvent *e)
                 }
             }
             m_lastClickedRow = row;
-            update();
+            viewport()->update();
         }
     }
-    QWidget::mousePressEvent(e);
+    // Намеренно НЕ вызываем QHeaderView::mousePressEvent:
+    // это предотвращает нежелательную встроенную логику выделения секций.
+    e->accept();
 }
 
 void ChartHeaderView::mouseMoveEvent(QMouseEvent *e)
@@ -134,22 +122,26 @@ void ChartHeaderView::mouseMoveEvent(QMouseEvent *e)
                                 m_headerResizeStartW + delta,
                                 kHeaderMaxWidth);
         m_model->setHeaderWidth(newW);
-        e->accept(); return;
+        e->accept();
+        return;
     }
 
     if (m_resizing && (e->buttons() & Qt::LeftButton)) {
         const int delta = e->pos().y() - m_resizePressY;
         const ChartSeries *s = m_model->series(m_resizeRow);
         if (s) m_model->setSeriesRowHeight(s->name, m_resizeStartH + delta);
-        e->accept(); return;
+        e->accept();
+        return;
     }
+
     if (rowAtResizeHandle(e->pos().y()) >= 0)
         setCursor(Qt::SizeVerCursor);
-    else if (e->pos().x() >= width() - kHeaderResizeZone)
+    else if (e->pos().x() >= viewport()->width() - kHeaderResizeZone)
         setCursor(Qt::SizeHorCursor);
     else
         unsetCursor();
-    QWidget::mouseMoveEvent(e);
+
+    e->accept();
 }
 
 void ChartHeaderView::mouseReleaseEvent(QMouseEvent *e)
@@ -157,16 +149,24 @@ void ChartHeaderView::mouseReleaseEvent(QMouseEvent *e)
     if (m_headerResizing) {
         m_headerResizing = false;
         unsetCursor();
-        e->accept(); return;
+        e->accept();
+        return;
     }
-    if (m_resizing) { m_resizing = false; m_resizeRow = -1; unsetCursor(); e->accept(); return; }
-    QWidget::mouseReleaseEvent(e);
+    if (m_resizing) {
+        m_resizing  = false;
+        m_resizeRow = -1;
+        unsetCursor();
+        e->accept();
+        return;
+    }
+    e->accept();
 }
 
 void ChartHeaderView::leaveEvent(QEvent *e)
 {
-    if (!m_resizing) unsetCursor();
-    QWidget::leaveEvent(e);
+    if (!m_resizing && !m_headerResizing)
+        unsetCursor();
+    QHeaderView::leaveEvent(e);
 }
 
 void ChartHeaderView::setAutoFitY(bool on) { m_autoFitY = on; }
@@ -180,7 +180,7 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
     if (sourceRow >= 0 && !m_selectedRows.contains(sourceRow)) {
         m_selectedRows.clear();
         m_selectedRows.insert(sourceRow);
-        update();
+        viewport()->update();
     }
 
     const ChartSeries *src = (sourceRow >= 0) ? m_model->series(sourceRow) : nullptr;
@@ -190,8 +190,7 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
         "QMenu { background:#0f1219; color:#aabbcc; border:1px solid #1e2538; font:9pt 'Consolas'; }"
         "QMenu::item:selected { background:#1a2540; }"
         "QMenu::item:disabled { color:#445566; }"
-        "QMenu::separator { height:1px; background:#1e2538; margin:3px 8px; }"
-        );
+        "QMenu::separator { height:1px; background:#1e2538; margin:3px 8px; }");
 
     auto *actAutoFit = menu.addAction(u8"Авто-подстройка Y по видимому фрагменту");
     actAutoFit->setCheckable(true);
@@ -207,10 +206,9 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
 
     menu.addSeparator();
 
-    const bool multi = (m_selectedRows.size() > 1);
-
     if (src) {
         const QString srcName = src->name;
+        const bool multi = m_selectedRows.size() > 1;
 
         if (multi) {
             auto *actSync = menu.addAction(
@@ -250,10 +248,8 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
     menu.exec(e->globalPos());
 }
 
-
 // ─── Timestamp formatting ─────────────────────────────────────────────────────
 
-// epoch в секундах (double, дробная часть — субсекундная часть)
 QString ChartHeaderView::formatTimestamp(double epochSec)
 {
     if (epochSec <= 0 || !std::isfinite(epochSec)) return QStringLiteral("—");
@@ -284,32 +280,45 @@ QString ChartHeaderView::formatTimestampLine(double epochSec)
 }
 
 // ─── Paint ────────────────────────────────────────────────────────────────────
+//
+// Полностью переопределяем paintEvent — рисуем на viewport(), используем
+// sectionViewportPosition(r) вместо rowTop(r)-scrollOffset.
+// QHeaderView::paintEvent() не вызываем намеренно.
 
 void ChartHeaderView::paintEvent(QPaintEvent *)
 {
-    QPainter p(this);
-    p.fillRect(rect(), QColor(15, 18, 26));
+    QPainter p(viewport());
+    p.fillRect(viewport()->rect(), QColor(15, 18, 26));
+
+    if (!model()) return;   // модель ещё не подключена QTableView
 
     const int rows   = m_model->rowCount();
     const int cursor = m_model->cursorSample();
-    const int w      = width();
+    const int w      = viewport()->width();
+    const int vh     = viewport()->height();
 
     for (int r = 0; r < rows; ++r) {
-        const int y = rowTop(r) - m_scrollOffset;
-        const ChartSeries *s = m_model->series(r);
-        const int rh = s ? s->rowHeight : m_model->rowHeight();
+        const int y  = sectionViewportPosition(r);
+        const int rh = sectionSize(r);
         if (y + rh < 0) continue;
-        if (y > height()) break;
+        if (y > vh)     break;
+
+        const ChartSeries *s = m_model->series(r);
         if (!s) continue;
+
         paintRow(&p, QRect(0, y, w, rh), *s, cursor, m_selectedRows.contains(r));
-        // Resize handle hint — не показываем для фиксированных строк (биты)
+
+        // Resize handle hint внизу строки (не для фиксированных)
         if (s->minRowHeight != s->maxRowHeight || s->minRowHeight == 0)
             p.fillRect(QRect(0, y + rh - 3, w, 3), QColor(40, 55, 80));
     }
 
-    // Вертикальный resize handle — правый край всего заголовка
-    p.fillRect(QRect(w - 3, 0, 3, height()), QColor(40, 55, 80));
+    // Вертикальный resize handle — правый край заголовка
+    p.fillRect(QRect(w - 3, 0, 3, vh), QColor(40, 55, 80));
 }
+
+// ─── paintRow ─────────────────────────────────────────────────────────────────
+// Без изменений по сравнению с оригиналом.
 
 void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
                                const ChartSeries &s, int cursor, bool selected) const
@@ -377,7 +386,6 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
                     QString("×%1").arg(s.yScale, 0, 'f', 1));
     }
 
-    // Граница между именем и значением — значение никогда не перекрывает имя
     const int nameBottom = tr.top() + QFontMetrics(fn).height() + 3;
     const QRect valRect(tr.left(), nameBottom, tr.width(), tr.bottom() - nameBottom);
 
@@ -394,12 +402,10 @@ void ChartHeaderView::paintRow(QPainter *p, const QRect &r,
         else                  valStr = QString::number(sampleAt(s.data, cursor), 'g', 6);
 
         if (isTimestamp) {
-            // Числовое значение — под именем
             QFont fNum("Consolas", 10);
             p->setFont(fNum);
             p->drawText(valRect, Qt::AlignTop | Qt::AlignLeft, valStr);
 
-            // Читаемая дата — прижата к низу строки
             QFont fDt("Consolas", 10);
             p->setFont(fDt);
             const double epochSec = sampleAt(s.data, cursor);

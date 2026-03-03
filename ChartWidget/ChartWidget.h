@@ -35,11 +35,9 @@ private:
     ChartModel      *m_model      = nullptr;
     ChartView       *m_view       = nullptr;
     ChartHeaderView *m_headerView = nullptr;
-    QAction         *m_actAutoFit = nullptr;
 
     QToolBar *m_tb         = nullptr;
-    QWidget  *m_tbSpacer   = nullptr;   ///< Expanding spacer — разделяет левую и правую части тулбара
-    QLabel   *m_tsLabel    = nullptr;   ///< Текущий timestamp у курсора
-    QLabel   *m_hintsLabel = nullptr;   ///< Подсказки горячих клавиш
-    int       m_tsMinWidth = 0;         ///< Минимальная ширина метки timestamp (вычисляется 1 раз)
+    QWidget  *m_tbSpacer   = nullptr;
+    QLabel   *m_tsLabel    = nullptr;
+    QLabel   *m_hintsLabel = nullptr;
 };
