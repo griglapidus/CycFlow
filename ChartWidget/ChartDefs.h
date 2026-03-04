@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2026 Grigorii Lapidus
-
 #ifndef CHARTDEFS_H
 #define CHARTDEFS_H
 
@@ -219,9 +216,36 @@ struct SeriesBatch {
  * Owned exclusively by ChartModel; the rendering thread accesses an instance
  * read-only through ChartModel::SeriesPointerRole.
  */
+/**
+ * @brief Describes one data channel displayed in ChartView.
+ *
+ * Owned exclusively by ChartModel; the rendering thread accesses an instance
+ * read-only through ChartModel::SeriesPointerRole.
+ *
+ * ### Color management
+ * When @c colorIndex >= 0 the series participates in automatic theme-aware
+ * coloring.  ChartModel::reapplySeriesColors() resolves the index against the
+ * active ChartTheme palette and writes the result into @c color.
+ *
+ * When @c colorIndex == kManualColor the series was given an explicit color
+ * by the caller and is never touched by the automatic recoloring pass.
+ */
 struct ChartSeries {
+    /// Sentinel value for colorIndex meaning "user-supplied, do not recolor".
+    static constexpr int kManualColor = -1;
+
     QString      name;
-    QColor       color    = Qt::green;
+    QColor       color      = Qt::green;
+
+    /**
+     * @brief Index into the ChartTheme series-color palette, or kManualColor.
+     *
+     * Assigned automatically by ChartModel::addSeries() when no explicit color
+     * is provided.  Used by ChartModel::reapplySeriesColors() to update @c color
+     * when the application theme changes.
+     */
+    int          colorIndex = kManualColor;
+
     SampleBuffer data     = QVector<float>{};
     BoundsValue  minVal   = double( DBL_MAX);  ///< Running minimum, updated on each append
     BoundsValue  maxVal   = double(-DBL_MAX);  ///< Running maximum, updated on each append

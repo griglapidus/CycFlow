@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2026 Grigorii Lapidus
-
 #include "ChartModel.h"
 #include <QFontMetrics>
 
@@ -8,23 +5,12 @@ ChartModel::ChartModel(QObject *parent) : QAbstractTableModel(parent) {}
 
 // =============================================================================
 //  Row height limits
-//
-//  Minimum heights are computed from QFontMetrics so they scale correctly
-//  with the display DPI and the fonts chosen for rendering.  Hard-coded
-//  pixel values are avoided deliberately.
-//
-//  Standard row layout:
-//    [topPad] name [gap] value [botPad]
-//
-//  Timestamp row layout:
-//    [topPad] name [gap] epochNum [gap] date_line1 [gap] date_line2 [botPad]
 // =============================================================================
 
 namespace {
 
 struct RowHeightLimits { int min; int max; };
 
-// Font parameters must match those used in ChartHeaderView::paintRow().
 static RowHeightLimits computeLimits(ChartModel::RowKind kind)
 {
     constexpr int kTopPad = 6;
@@ -37,17 +23,14 @@ static RowHeightLimits computeLimits(ChartModel::RowKind kind)
 
     switch (kind) {
     case ChartModel::RowKind::Timestamp: {
-        // name + epochNum + date_line1 + date_line2
         const int h = kTopPad + nameH + kGap + smallH + kGap + smallH + smallH + kBotPad;
         return { h, INT_MAX };
     }
     case ChartModel::RowKind::Digital: {
-        // Fixed height: name and value on the same line
         const int h = kTopPad + qMax(nameH, valH) + kBotPad;
         return { h, h };
     }
     default: {
-        // Analogue: name above value, no overlap
         const int h = kTopPad + nameH + kGap + valH + kBotPad;
         return { h, INT_MAX };
     }
@@ -69,14 +52,24 @@ QString ChartModel::addSeries(const QString &name, const QColor &color, SampleTy
     const auto [minH, maxH] = computeLimits(kind);
 
     ChartSeries s;
-    s.name         = name;
-    s.color        = color;
-    s.data         = makeSampleBuffer(sampleType);
+    s.name      = name;
+    s.data      = makeSampleBuffer(sampleType);
     s.rowHeight    = qBound(minH, m_defaultRowHeight, maxH);
     s.minRowHeight = minH;
     s.maxRowHeight = maxH;
     auto [lo, hi] = makeBounds(sampleType);
     s.minVal = lo; s.maxVal = hi;
+
+    // Color assignment:
+    //   - invalid QColor  → auto-assign the next theme palette slot
+    //   - valid   QColor  → pin to the caller's color, never recolor
+    if (color.isValid()) {
+        s.color      = color;
+        s.colorIndex = ChartSeries::kManualColor;
+    } else {
+        s.colorIndex = m_nextColorIndex++;
+        s.color      = ChartTheme::seriesColor(s.colorIndex, ChartTheme::systemVariant());
+    }
 
     int row;
     { QReadLocker lk(&m_lock); row = m_order.size(); }
@@ -111,6 +104,19 @@ QString ChartModel::addDigitalSeries(const QString &bitName, const QColor &color
     return name;
 }
 
+void ChartModel::reapplySeriesColors(ChartTheme::Variant v)
+{
+    {
+        QWriteLocker lk(&m_lock);
+        for (auto &s : m_data) {
+            if (s.colorIndex == ChartSeries::kManualColor) continue;
+            s.color = ChartTheme::seriesColor(s.colorIndex, v);
+        }
+    }
+    if (!m_order.isEmpty())
+        emit dataChanged(index(0, 0), index(m_order.size() - 1, 0));
+}
+
 void ChartModel::clearSeries(const QString &name)
 {
     int row = -1;
@@ -135,6 +141,7 @@ void ChartModel::clearAll()
         m_data.clear();
         m_order.clear();
         m_rowIndex.clear();
+        m_nextColorIndex = 0;
         m_cursor.store(-1, std::memory_order_relaxed);
     }
     endResetModel();
@@ -243,7 +250,6 @@ void ChartModel::setRowHeight(int px)
     {
         QWriteLocker lk(&m_lock);
         for (auto &s : m_data) {
-            // Fixed rows (digital signals): min == max — do not touch.
             if (s.minRowHeight > 0 && s.minRowHeight == s.maxRowHeight) continue;
             s.rowHeight = qBound(
                 s.minRowHeight > 0 ? s.minRowHeight : px,

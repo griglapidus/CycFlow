@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2026 Grigorii Lapidus
-
 #ifndef CHARTMODEL_H
 #define CHARTMODEL_H
 
 #include "ChartDefs.h"
+#include "ChartTheme.h"
 
 #include <QAbstractTableModel>
 #include <QHash>
@@ -25,6 +23,13 @@
  * | SeriesPointerRole   | const void *    | Read-only pointer to a ChartSeries  |
  * | CursorSampleRole    | int             | Current cursor sample index         |
  * | PpsRole             | float           | Current pixels-per-sample value     |
+ *
+ * ### Color management
+ * When @p color is omitted (or an invalid QColor is passed) in addSeries(),
+ * the model auto-assigns the next available slot from the ChartTheme series
+ * color palette and stores the index in ChartSeries::colorIndex.
+ * Calling reapplySeriesColors() after a theme switch re-resolves all
+ * auto-assigned colors to the new variant without touching manually set ones.
  *
  * ### Thread safety
  * appendBatch() / appendData() acquire a write lock.
@@ -85,12 +90,15 @@ public:
      * If a series with the same name already exists the call is a no-op.
      *
      * @param name        Unique series identifier.
-     * @param color       Plot colour.
+     * @param color       Plot colour.  Pass an invalid QColor (the default) to
+     *                    have the model auto-assign a theme-aware color from the
+     *                    ChartTheme palette.  Pass an explicit QColor to pin the
+     *                    series to that color regardless of the active theme.
      * @param sampleType  Native storage type for samples.
      * @return The series name (can be used as a key in subsequent calls).
      */
     QString addSeries(const QString &name,
-                      const QColor  &color      = Qt::green,
+                      const QColor  &color      = QColor{},
                       SampleType     sampleType = SampleType::Float32);
 
     /**
@@ -100,10 +108,10 @@ public:
      * a compact, non-resizable row height.
      *
      * @param bitName  Unique series identifier.
-     * @param color    Plot colour.
+     * @param color    Plot colour.  An invalid QColor triggers auto-assignment.
      * @return The series name.
      */
-    QString addDigitalSeries(const QString &bitName, const QColor &color);
+    QString addDigitalSeries(const QString &bitName, const QColor &color = QColor{});
 
     /**
      * @brief Appends typed samples to a single series.
@@ -187,6 +195,17 @@ public:
     /** @brief Returns the current cursor sample index (-1 = none). */
     int cursorSample() const { return m_cursor.load(std::memory_order_relaxed); }
 
+    /**
+     * @brief Re-resolves theme-managed series colors to the given variant.
+     *
+     * Should be called whenever the application theme changes (e.g. from
+     * ChartWidget::applyCurrentTheme()).  Only series whose colorIndex !=
+     * ChartSeries::kManualColor are updated; manually set colors are untouched.
+     *
+     * @param v  The newly active theme variant.
+     */
+    void reapplySeriesColors(ChartTheme::Variant v);
+
     // --- QAbstractTableModel -------------------------------------------------
     int      rowCount   (const QModelIndex &parent = {}) const override;
     int      columnCount(const QModelIndex &parent = {}) const override;
@@ -236,6 +255,9 @@ private:
     float m_pps              = kDefaultPps;
     int   m_defaultRowHeight = kDefaultRowHeight;
     int   m_headerWidth      = kDefaultHeaderWidth;
+
+    /// Counter incremented each time a series receives an auto-assigned color.
+    int m_nextColorIndex = 0;
 
     std::atomic<int> m_cursor{-1};
 };

@@ -36,8 +36,16 @@ SampleType ChartConsumer::mapFieldType(cyc::DataType cbfType) {
 
 void ChartConsumer::onConsumeStart() {
     auto rule = m_buffer->getRule();
-    const QList<QColor> colors = {Qt::green, Qt::cyan, Qt::magenta, Qt::yellow, Qt::red, Qt::white};
-    int colorIndex = 0;
+
+    // Colors are intentionally NOT set here.
+    // ChartModel::addSeries() / addDigitalSeries() receive an invalid QColor
+    // (the default) and auto-assign a theme-aware color from ChartTheme.
+    // This ensures series colors are always correct for the active theme
+    // (dark or light) without ChartConsumer needing to know anything about UI.
+    //
+    // To pin a specific color to a series, set cfg.color to a valid QColor
+    // before emitting headerParsed(); ChartModel will then use it as-is and
+    // will not recolor it on theme changes.
 
     for (const auto& attr : rule.getAttributes()) {
         const QString baseName = QString::fromStdString(attr.name);
@@ -45,7 +53,6 @@ void ChartConsumer::onConsumeStart() {
         if (attr.hasBitFields()) {
             CbfSeriesConfig regCfg;
             regCfg.name  = baseName;
-            regCfg.color = colors[colorIndex++ % colors.size()];
             regCfg.type  = mapFieldType(rule.getType(attr.id));
             regCfg.id    = attr.id;
             regCfg.index = 0;
@@ -57,13 +64,12 @@ void ChartConsumer::onConsumeStart() {
                 if (bid == 0) continue;
 
                 CbfSeriesConfig bitCfg;
-                bitCfg.name          = QString::fromStdString(cyc::PReg::getName(bid));
-                bitCfg.color         = colors[colorIndex++ % colors.size()];
-                bitCfg.type          = SampleType::UInt8;
-                bitCfg.id            = attr.id;
-                bitCfg.index         = 0;
-                bitCfg.isDigital     = true;
-                bitCfg.bitPregId     = bid;
+                bitCfg.name      = QString::fromStdString(cyc::PReg::getName(bid));
+                bitCfg.type      = SampleType::UInt8;
+                bitCfg.id        = attr.id;
+                bitCfg.index     = 0;
+                bitCfg.isDigital = true;
+                bitCfg.bitPregId = bid;
                 m_configs.append(bitCfg);
                 m_currentBatch.append({bitCfg.name, makeSampleBuffer(SampleType::UInt8)});
             }
@@ -78,7 +84,6 @@ void ChartConsumer::onConsumeStart() {
             cfg.name  = (count > 1)
                            ? QString("%1[%2]").arg(baseName).arg(i)
                            : baseName;
-            cfg.color = colors[colorIndex++ % colors.size()];
             cfg.type  = mapFieldType(rule.getType(attr.id));
             cfg.id    = attr.id;
             cfg.index = static_cast<int>(i);

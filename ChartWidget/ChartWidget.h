@@ -71,8 +71,22 @@ protected:
      * @brief Re-applies the current theme when the OS colour scheme changes.
      *
      * Reacts to QEvent::ApplicationPaletteChange and QEvent::PaletteChange.
+     * On Windows these events are unreliable; theme detection is also done
+     * via QStyleHints::colorSchemeChanged (Qt >= 6.5) and nativeEvent
+     * (WM_SETTINGCHANGE / WM_THEMECHANGED) as fallbacks.
      */
     void changeEvent(QEvent *e) override;
+
+#if defined(Q_OS_WIN)
+    /**
+     * @brief Catches WM_SETTINGCHANGE and WM_THEMECHANGED on Windows.
+     *
+     * Fallback for Qt < 6.5 where QStyleHints::colorSchemeChanged is not
+     * available and ApplicationPaletteChange is not reliably delivered.
+     */
+    bool nativeEvent(const QByteArray &eventType,
+                     void *message, qintptr *result) override;
+#endif
 
 private slots:
     /** @brief Updates the timestamp label in the toolbar when the cursor moves. */
@@ -101,6 +115,14 @@ private:
 
     /** @brief Explicit theme override; std::nullopt = auto-detect from OS. */
     std::optional<ChartTheme::Variant> m_themeOverride;
+
+    /** @brief Guards against re-entrant applyCurrentTheme() calls.
+     *
+     *  QApplication::setPalette() emits ApplicationPaletteChange, which
+     *  delivers changeEvent() again while we are still inside applyCurrentTheme().
+     *  This flag breaks the cycle.
+     */
+    bool m_applyingTheme = false;
 };
 
 #endif // CHARTWIDGET_H

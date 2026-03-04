@@ -4,6 +4,11 @@
 #include "ChartWidget.h"
 
 #include <QApplication>
+#include <QGuiApplication>
+#include <QStyleHints>
+#if defined(Q_OS_WIN)
+#  include <windows.h>
+#endif
 #include <QLayout>
 #include <QToolBar>
 #include <QAction>
@@ -80,9 +85,25 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     connect(m_view,       &ChartView::autoFitYChanged,
             m_headerView, &ChartHeaderView::setAutoFitY);
 
-    // Apply the theme immediately; changeEvent() will re-apply it if the OS
-    // theme changes while the application is running.
+    // Apply the theme immediately.
     applyCurrentTheme();
+
+    // On Windows, QEvent::ApplicationPaletteChange is not reliably delivered
+    // when the user switches between light and dark mode in System Settings.
+    // Qt 6.5+ exposes a dedicated signal for this; connect to it here so that
+    // the theme is updated regardless of which delivery path fires first.
+    // For Qt < 6.5 on Windows the nativeEvent() override handles
+    // WM_SETTINGCHANGE / WM_THEMECHANGED as a fallback.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, [this](Qt::ColorScheme) {
+                if (!m_themeOverride.has_value()) {
+                    applyCurrentTheme();
+                    if (m_view) m_view->viewport()->update();
+                    update();
+                }
+            });
+#endif
 
     // Toolbar style: structural only (spacing, font, border shape).
     // Colours are inherited from QPalette via palette() references in QSS.
@@ -159,13 +180,13 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
             + kTsLabelMinWidthPad;
         m_tsLabel->setMinimumWidth(tsMinWidth);
     }
-
+    m_tb->addSeparator();
     // Keyboard shortcut hint label — uses Mid colour (subdued, informational).
     m_hintsLabel = new QLabel(
         "Ctrl+Wheel: X  |  Shift+Wheel: Y  |  LMB: pan Y  |  RMB: pan X  |  A / F",
         m_tb);
     m_hintsLabel->setStyleSheet(QString(
-                                    "QLabel { font: %1pt 'Consolas'; color: palette(mid);"
+                                    "QLabel { font: %1pt 'Consolas'; color: palette(HighlightedText);"
                                     "         padding: 0 6px; border-left: 1px solid palette(mid); }")
                                     .arg(kToolbarFontPt));
     m_hintsLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
@@ -245,11 +266,52 @@ void ChartWidget::changeEvent(QEvent *e)
     if (e->type() == QEvent::ApplicationPaletteChange ||
         e->type() == QEvent::PaletteChange)
     {
+        // Guard against re-entrancy: applyCurrentTheme() calls
+        // QApplication::setPalette() which itself emits
+        // ApplicationPaletteChange, triggering changeEvent() again.
+        if (m_applyingTheme) return;
+        m_applyingTheme = true;
         applyCurrentTheme();
+        m_applyingTheme = false;
         if (m_view) m_view->viewport()->update();
         update();
     }
 }
+
+#if defined(Q_OS_WIN)
+bool ChartWidget::nativeEvent(const QByteArray &eventType,
+                              void *message, qintptr *result)
+{
+    // WM_SETTINGCHANGE fires when the user changes system settings, including
+    // the light/dark mode toggle (lParam = L"ImmersiveColorSet").
+    // WM_THEMECHANGED fires when the Windows visual theme changes.
+    // Both can arrive before Qt has updated its own palette, so applyCurrentTheme()
+    // is scheduled via a queued call to let Qt finish processing first.
+    // Only used on Qt < 6.5; on Qt 6.5+ colorSchemeChanged handles this.
+#  if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+    if (eventType == "windows_generic_MSG" ||
+        eventType == "windows_dispatcher_MSG")
+    {
+        const MSG *msg = static_cast<const MSG *>(message);
+        if ((msg->message == WM_SETTINGCHANGE ||
+             msg->message == WM_THEMECHANGED) && !m_themeOverride.has_value())
+        {
+            QMetaObject::invokeMethod(this, [this]() {
+                if (!m_applyingTheme) {
+                    applyCurrentTheme();
+                    if (m_view) m_view->viewport()->update();
+                    update();
+                }
+            }, Qt::QueuedConnection);
+        }
+    }
+#  else
+    Q_UNUSED(eventType) Q_UNUSED(message)
+#  endif
+    Q_UNUSED(result)
+    return false;
+}
+#endif // Q_OS_WIN
 
 void ChartWidget::setTheme(ChartTheme::Variant v)
 {
@@ -260,7 +322,10 @@ void ChartWidget::setTheme(ChartTheme::Variant v)
 void ChartWidget::applyCurrentTheme()
 {
     const ChartTheme::Variant v = m_themeOverride.value_or(ChartTheme::systemVariant());
-    // Apply to QApplication so every widget in the process (menus, dialogs,
-    // scroll bars, etc.) receives a consistent palette and style sheet.
+    // Apply QPalette + scroll bar stylesheet to the whole application so that
+    // every widget (menus, dialogs, scroll bars, etc.) looks consistent.
     ChartTheme::applyToApplication(v);
+    // Re-resolve theme-managed series colors to the new variant.
+    // Manually pinned colors (colorIndex == kManualColor) are left untouched.
+    if (m_model) m_model->reapplySeriesColors(v);
 }
