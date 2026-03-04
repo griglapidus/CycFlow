@@ -74,6 +74,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 void MainWindow::setupUi() {
     // 1. Toolbar
     QToolBar* tb = addToolBar("Main Controls");
+    tb->setObjectName("mainToolBar");
     tb->setMovable(false);
 
     QAction* actStartAll = tb->addAction("Start All");

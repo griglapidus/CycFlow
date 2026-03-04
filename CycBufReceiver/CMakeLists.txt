@@ -10,7 +10,9 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 add_executable(CycBufReceiver WIN32
     main.cpp
-    MainWindow.h MainWindow.cpp
+    ../resources/Icon_dark.qrc
+    MainWindow.h
+    MainWindow.cpp
     ../ChartWidget/ChartDefs.h
     ../ChartWidget/ChartDelegate.cpp
     ../ChartWidget/ChartDelegate.h
@@ -22,10 +24,13 @@ add_executable(CycBufReceiver WIN32
     ../ChartWidget/ChartView.h
     ../ChartWidget/ChartWidget.cpp
     ../ChartWidget/ChartWidget.h
+    ../ChartWidget/ChartTheme.cpp
+    ../ChartWidget/ChartTheme.h
     AppConfig.h
-    ChartConsumer.h ChartConsumer.cpp
-    TcpSessionWidget.h TcpSessionWidget.cpp
-    ../resources/Icon_dark.qrc
+    ChartConsumer.h
+    ChartConsumer.cpp
+    TcpSessionWidget.h
+    TcpSessionWidget.cpp
 )
 
 target_link_libraries(CycBufReceiver

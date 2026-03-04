@@ -1,24 +1,30 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
+
 #include "ChartModel.h"
 #include <QFontMetrics>
 
 ChartModel::ChartModel(QObject *parent) : QAbstractTableModel(parent) {}
 
-// ─── Row height limits ────────────────────────────────────────────────────────
+// =============================================================================
+//  Row height limits
 //
-// Минимальные высоты вычисляются один раз из QFontMetrics — они зависят от
-// шрифта, поэтому нельзя задавать их константами в пикселях.
+//  Minimum heights are computed from QFontMetrics so they scale correctly
+//  with the display DPI and the fonts chosen for rendering.  Hard-coded
+//  pixel values are avoided deliberately.
 //
-// Схема строки (обычная):
-//   [topPad] name [gap] value [botPad]
+//  Standard row layout:
+//    [topPad] name [gap] value [botPad]
 //
-// Схема строки (TimeStamp):
-//   [topPad] name [gap] epochNum [gap] date_line1 [gap] date_line2 [botPad]
+//  Timestamp row layout:
+//    [topPad] name [gap] epochNum [gap] date_line1 [gap] date_line2 [botPad]
+// =============================================================================
 
 namespace {
 
 struct RowHeightLimits { int min; int max; };
 
-// Параметры шрифтов должны совпадать с теми, что используются в paintRow.
+// Font parameters must match those used in ChartHeaderView::paintRow().
 static RowHeightLimits computeLimits(ChartModel::RowKind kind)
 {
     constexpr int kTopPad = 6;
@@ -36,12 +42,12 @@ static RowHeightLimits computeLimits(ChartModel::RowKind kind)
         return { h, INT_MAX };
     }
     case ChartModel::RowKind::Digital: {
-        // Фиксированная высота: имя + значение рядом на одной строке
+        // Fixed height: name and value on the same line
         const int h = kTopPad + qMax(nameH, valH) + kBotPad;
         return { h, h };
     }
     default: {
-        // Обычное поле: name + value без наложения
+        // Analogue: name above value, no overlap
         const int h = kTopPad + nameH + kGap + valH + kBotPad;
         return { h, INT_MAX };
     }
@@ -50,7 +56,9 @@ static RowHeightLimits computeLimits(ChartModel::RowKind kind)
 
 } // namespace
 
-// ─── Series management ────────────────────────────────────────────────────────
+// =============================================================================
+//  Series management
+// =============================================================================
 
 QString ChartModel::addSeries(const QString &name, const QColor &color, SampleType sampleType)
 {
@@ -74,7 +82,12 @@ QString ChartModel::addSeries(const QString &name, const QColor &color, SampleTy
     { QReadLocker lk(&m_lock); row = m_order.size(); }
 
     beginInsertRows({}, row, row);
-    { QWriteLocker lk(&m_lock); m_rowIndex.insert(name, m_order.size()); m_data.insert(name, std::move(s)); m_order.append(name); }
+    {
+        QWriteLocker lk(&m_lock);
+        m_rowIndex.insert(name, m_order.size());
+        m_data.insert(name, std::move(s));
+        m_order.append(name);
+    }
     endInsertRows();
     return name;
 }
@@ -87,11 +100,11 @@ QString ChartModel::addDigitalSeries(const QString &bitName, const QColor &color
         QWriteLocker lk(&m_lock);
         auto it = m_data.find(name);
         if (it != m_data.end()) {
-            it->rowHeight    = minH;   // == maxH, фиксировано
+            it->rowHeight    = minH;   // minH == maxH for digital rows
             it->minRowHeight = minH;
             it->maxRowHeight = maxH;
-            it->minVal = double(0.0);
-            it->maxVal = double(1.0);
+            it->minVal       = double(0.0);
+            it->maxVal       = double(1.0);
         }
     }
     emit layoutChanged();
@@ -105,7 +118,7 @@ void ChartModel::clearSeries(const QString &name)
         QWriteLocker lk(&m_lock);
         auto it = m_data.find(name);
         if (it == m_data.end()) return;
-        ChartSeries &s = it.value();
+        ChartSeries &s  = it.value();
         const SampleType t = static_cast<SampleType>(s.data.index());
         s.data = makeSampleBuffer(t);
         auto [lo, hi] = makeBounds(t); s.minVal = lo; s.maxVal = hi;
@@ -177,7 +190,8 @@ int ChartModel::appendToSeries(ChartSeries &s, const SampleBuffer &src)
             s.data = makeSampleBuffer(t);
             auto [lo, hi] = makeBounds(t); s.minVal = lo; s.maxVal = hi;
         } else {
-            qWarning("ChartModel::appendToSeries: type mismatch for '%s' — skipped", qPrintable(s.name));
+            qWarning("ChartModel::appendToSeries: type mismatch for '%s' — skipped",
+                     qPrintable(s.name));
             return 0;
         }
     }
@@ -194,34 +208,47 @@ int ChartModel::appendToSeries(ChartSeries &s, const SampleBuffer &src)
             for (uint64_t v : srcVec) { if (v < lo) lo = v; if (v > hi) hi = v; }
         } else {
             auto &lo = std::get<double>(s.minVal); auto &hi = std::get<double>(s.maxVal);
-            for (const T &v : srcVec) { const double dv=static_cast<double>(v); if(dv<lo) lo=dv; if(dv>hi) hi=dv; }
+            for (const T &v : srcVec) {
+                const double dv = static_cast<double>(v);
+                if (dv < lo) lo = dv; if (dv > hi) hi = dv;
+            }
         }
         dstVec.append(srcVec);
         return dstVec.size();
     }, src);
 }
 
+// =============================================================================
+//  Display parameter setters
+// =============================================================================
+
 void ChartModel::setPixelsPerSample(float pps)
 {
-    pps = qBound(0.01f, pps, 200.f);
+    pps = qBound(kMinPps, pps, kMaxPps);
     if (qFuzzyCompare(pps, m_pps)) return;
     m_pps = pps;
     emit layoutChanged();
 }
 
-void ChartModel::setPpsQuiet(float pps) { m_pps = qBound(0.01f, pps, 200.f); }
+void ChartModel::setPpsQuiet(float pps)
+{
+    m_pps = qBound(kMinPps, pps, kMaxPps);
+}
 
 void ChartModel::setRowHeight(int px)
 {
-    px = qMax(30, px);
+    px = qMax(kMinRowHeight, px);
     if (px == m_defaultRowHeight) return;
     m_defaultRowHeight = px;
     {
         QWriteLocker lk(&m_lock);
         for (auto &s : m_data) {
-            // Фиксированные строки (бит): min==max — не трогаем
+            // Fixed rows (digital signals): min == max — do not touch.
             if (s.minRowHeight > 0 && s.minRowHeight == s.maxRowHeight) continue;
-            s.rowHeight = qBound(s.minRowHeight > 0 ? s.minRowHeight : px, px, s.maxRowHeight > s.minRowHeight ? s.maxRowHeight : s.minRowHeight + 1);
+            s.rowHeight = qBound(
+                s.minRowHeight > 0 ? s.minRowHeight : px,
+                px,
+                s.maxRowHeight > s.minRowHeight ? s.maxRowHeight : s.minRowHeight + 1);
         }
     }
     emit layoutChanged();
@@ -229,7 +256,7 @@ void ChartModel::setRowHeight(int px)
 
 void ChartModel::setHeaderWidth(int px)
 {
-    px = qMax(80, px);
+    px = qMax(kMinHeaderWidth, px);
     if (px == m_headerWidth) return;
     m_headerWidth = px;
     emit layoutChanged();
@@ -242,8 +269,8 @@ void ChartModel::setSeriesRowHeight(const QString &name, int px)
         QWriteLocker lk(&m_lock);
         auto it = m_data.find(name);
         if (it == m_data.end()) return;
-        const int lo = it->minRowHeight > 0 ? it->minRowHeight : 1;
-        const int hi = it->maxRowHeight < INT_MAX ? it->maxRowHeight : INT_MAX;
+        const int lo      = it->minRowHeight > 0 ? it->minRowHeight : 1;
+        const int hi      = it->maxRowHeight < INT_MAX ? it->maxRowHeight : INT_MAX;
         const int clamped = qBound(lo, px, hi);
         if (it->rowHeight == clamped) return;
         it->rowHeight = clamped;
@@ -254,7 +281,7 @@ void ChartModel::setSeriesRowHeight(const QString &name, int px)
 
 void ChartModel::setSeriesYScale(const QString &name, float scale)
 {
-    scale = qMax(0.05f, scale);
+    scale = qMax(kMinYScale, scale);
     int row = -1;
     {
         QWriteLocker lk(&m_lock);

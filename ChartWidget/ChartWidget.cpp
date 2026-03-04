@@ -1,28 +1,71 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
+
 #include "ChartWidget.h"
 
+#include <QApplication>
 #include <QLayout>
 #include <QToolBar>
 #include <QAction>
 #include <QShowEvent>
 #include <QFontMetrics>
 #include <QToolButton>
+#include <optional>
+#include <QScrollBar>
+
+namespace {
+
+/// The vertical scroll bar single-step is set to totalContentHeight / kScrollStepDivisor.
+/// A larger value produces a coarser step; a smaller value produces a finer one.
+constexpr int kScrollStepDivisor = 30;
+
+/// Toolbar action icon size (square, pixels).
+constexpr int kToolbarIconSize = 14;
+
+/// Toolbar font size (Consolas), in points.
+constexpr int kToolbarFontPt = 9;
+
+/// Toolbar button border radius (pixels).
+constexpr int kToolbarBorderRadius = 3;
+
+/// Horizontal padding inside toolbar buttons (pixels).
+constexpr int kToolbarButtonPadH = 7;
+
+/// Vertical padding inside toolbar buttons (pixels).
+constexpr int kToolbarButtonPadV = 2;
+
+/// Extra horizontal padding added to the minimum timestamp label width (pixels).
+constexpr int kTsLabelMinWidthPad = 20;
+
+} // namespace
 
 ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
 {
-    m_model = new ChartModel(this);
-    m_view  = new ChartView(this);
+    m_model      = new ChartModel(this);
+    m_view       = new ChartView(this);
 
-    // ChartHeaderView создаём без родителя — QTableView возьмёт владение
-    // при вызове setVerticalHeader().
+    // ChartHeaderView is constructed without a parent — QTableView takes
+    // ownership when setVerticalHeader() is called.
     m_headerView = new ChartHeaderView(m_model, nullptr);
 
-    // ── Встраиваем заголовок в ChartView ──────────────────────────────────
-    // Важно: setVerticalHeader() до setChartModel(), чтобы при setModel()
-    // Qt корректно связал заголовок с моделью и полосой прокрутки.
+    // Install the header before setChartModel() so that when setModel() runs
+    // internally, Qt can correctly bind the header to the model and scroll bar.
     m_view->setVerticalHeader(m_headerView);
     m_view->setChartModel(m_model);
 
-    // ── Сигналы заголовка → ChartView ─────────────────────────────────────
+    m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+
+    // Adjust the vertical scroll step proportionally to the total content height.
+    QObject::connect(m_view->verticalScrollBar(), &QScrollBar::rangeChanged,
+                     m_view, [tableView = m_view]() {
+                         int totalH = tableView->verticalHeader()->length();
+                         if (totalH > 0) {
+                             int step = qMax(1, totalH / kScrollStepDivisor);
+                             tableView->verticalScrollBar()->setSingleStep(step);
+                         }
+                     });
+
+    // --- Header → View signal forwarding ------------------------------------
     connect(m_headerView, &ChartHeaderView::syncScaleRequested,
             m_view,       &ChartView::syncScale);
     connect(m_headerView, &ChartHeaderView::overlayRequested,
@@ -34,29 +77,38 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
             m_view,       &ChartView::fitYToVisible);
     connect(m_headerView, &ChartHeaderView::autoFitYToggleRequested,
             m_view,       &ChartView::toggleAutoFitY);
-    connect(m_view, &ChartView::autoFitYChanged,
+    connect(m_view,       &ChartView::autoFitYChanged,
             m_headerView, &ChartHeaderView::setAutoFitY);
 
-    // ── Toolbar ───────────────────────────────────────────────────────────
-    const QString tbStyle =
-        "QToolBar { background:#0c1018; border-bottom:1px solid #1e2538;"
-        "           spacing:2px; padding:2px 6px; }"
-        "QToolButton { color:#8899bb; background:transparent;"
-        "              border:1px solid #1e2538; border-radius:3px;"
-        "             padding:2px 7px; font:9pt 'Consolas'; }"
-        "QToolButton:hover   { color:#dde8ff; background:#1a2035; }"
-        "QToolButton:pressed { background:#242d45; }"
-        "QToolButton:checked { color:#aaddff; background:#1a2a45;"
-        "                      border-color:#2a4a80; }";
+    // Apply the theme immediately; changeEvent() will re-apply it if the OS
+    // theme changes while the application is running.
+    applyCurrentTheme();
+
+    // Toolbar style: structural only (spacing, font, border shape).
+    // Colours are inherited from QPalette via palette() references in QSS.
+    const QString tbStyle = QString(
+                                "QToolBar { spacing: 2px; padding: 2px 6px; }"
+                                "QToolButton {"
+                                "    border: 1px solid palette(mid);"
+                                "    border-radius: %1px;"
+                                "    padding: %2px %3px;"
+                                "    font: %4pt 'Consolas';"
+                                "}"
+                                "QToolButton:checked  { background: palette(highlight); }"
+                                "QToolButton:disabled { color: palette(mid); }")
+                                .arg(kToolbarBorderRadius)
+                                .arg(kToolbarButtonPadV)
+                                .arg(kToolbarButtonPadH)
+                                .arg(kToolbarFontPt);
 
     m_tb = new QToolBar(this);
     m_tb->setMovable(false);
     m_tb->setFloatable(false);
-    m_tb->setIconSize({14, 14});
+    m_tb->setIconSize({kToolbarIconSize, kToolbarIconSize});
     m_tb->setStyleSheet(tbStyle);
 
     auto *actXIn  = new QAction("X +", m_tb);
-    auto *actXOut = new QAction("X −", m_tb);
+    auto *actXOut = new QAction("X \xe2\x88\x92", m_tb);  // X −
     connect(actXIn,  &QAction::triggered, m_model, &ChartModel::zoomXIn);
     connect(actXOut, &QAction::triggered, m_model, &ChartModel::zoomXOut);
     m_tb->addAction(actXIn);
@@ -64,60 +116,65 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actYIn  = new QAction("Y +", m_tb);
-    auto *actYOut = new QAction("Y −", m_tb);
+    auto *actYOut = new QAction("Y \xe2\x88\x92", m_tb);  // Y −
     connect(actYIn,  &QAction::triggered, m_model, &ChartModel::zoomYIn);
     connect(actYOut, &QAction::triggered, m_model, &ChartModel::zoomYOut);
     m_tb->addAction(actYIn);
     m_tb->addAction(actYOut);
     m_tb->addSeparator();
 
-    auto actAutoFit = new QAction("Auto Y", m_tb);
+    auto *actAutoFit = new QAction("Auto Y", m_tb);
     actAutoFit->setCheckable(true);
     actAutoFit->setChecked(false);
-    actAutoFit->setToolTip(u8"Auto Fit Y by visible area");
+    actAutoFit->setToolTip("Auto-fit Y to the visible X range");
     connect(actAutoFit, &QAction::triggered, m_view, &ChartView::setAutoFitY);
     connect(m_view, &ChartView::autoFitYChanged, actAutoFit, &QAction::setChecked);
     m_tb->addAction(actAutoFit);
     m_tb->addSeparator();
 
     auto *actReset = new QAction("Reset", m_tb);
-    actReset->setToolTip(u8"Reset all display options");
+    actReset->setToolTip("Reset all display parameters");
     connect(actReset, &QAction::triggered, m_model, &ChartModel::resetAllDisplayParams);
     m_tb->addAction(actReset);
 
+    // Expanding spacer pushes the labels to the right.
     m_tbSpacer = new QWidget(m_tb);
     m_tbSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_tb->addWidget(m_tbSpacer);
 
+    // Cursor timestamp label — uses Link colour (accent, readable in both themes).
     m_tsLabel = new QLabel(m_tb);
-    m_tsLabel->setStyleSheet(
-        "QLabel { color:#88ccaa; font:9pt 'Consolas'; padding:0 8px 0 4px;"
-        "         border-left:1px solid #1e2538; }");
+    m_tsLabel->setStyleSheet(QString(
+                                 "QLabel { font: %1pt 'Consolas'; color: palette(link);"
+                                 "         padding: 0 8px 0 4px; border-left: 1px solid palette(mid); }")
+                                 .arg(kToolbarFontPt));
     m_tsLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     m_tsLabel->setTextFormat(Qt::PlainText);
     m_tb->addWidget(m_tsLabel);
 
     {
-        const QFontMetrics fm(QFont("Consolas", 9));
+        const QFontMetrics fm(QFont("Consolas", kToolbarFontPt));
         const int tsMinWidth =
-            fm.horizontalAdvance(QStringLiteral("2000-01-01 00:00:00.000 +00:00")) + 20;
+            fm.horizontalAdvance(QStringLiteral("2000-01-01 00:00:00.000 +00:00"))
+            + kTsLabelMinWidthPad;
         m_tsLabel->setMinimumWidth(tsMinWidth);
     }
 
+    // Keyboard shortcut hint label — uses Mid colour (subdued, informational).
     m_hintsLabel = new QLabel(
-        u8"Ctrl+Wheel: X  |  Shift+Wheel: Y  |  LMB: сдвиг Y  |  RMB: pan X  |  A / F",
+        "Ctrl+Wheel: X  |  Shift+Wheel: Y  |  LMB: pan Y  |  RMB: pan X  |  A / F",
         m_tb);
-    m_hintsLabel->setStyleSheet(
-        "QLabel { color:#334466; font:9pt 'Consolas'; padding:0 6px;"
-        "         border-left:1px solid #1e2538; }");
+    m_hintsLabel->setStyleSheet(QString(
+                                    "QLabel { font: %1pt 'Consolas'; color: palette(mid);"
+                                    "         padding: 0 6px; border-left: 1px solid palette(mid); }")
+                                    .arg(kToolbarFontPt));
     m_hintsLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
     m_tb->addWidget(m_hintsLabel);
 
     connect(m_model, &ChartModel::cursorMoved, this, &ChartWidget::onCursorMoved);
 
-    // ── Layout ────────────────────────────────────────────────────────────
-    // ChartHeaderView теперь встроен в ChartView как vertical header —
-    // отдельный HBoxLayout больше не нужен.
+    // ChartHeaderView is now embedded in ChartView as the vertical header —
+    // no separate HBoxLayout is needed.
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
@@ -158,7 +215,9 @@ void ChartWidget::updateToolbarLayout()
     const int available = m_tbSpacer->width() + rightOccupied;
 
     const bool hasTs  = !m_tsLabel->text().isEmpty();
-    const int  tsW    = hasTs ? qMax(m_tsLabel->minimumWidth(), m_tsLabel->sizeHint().width()) : 0;
+    const int  tsW    = hasTs
+                        ? qMax(m_tsLabel->minimumWidth(), m_tsLabel->sizeHint().width())
+                        : 0;
     const int  hintsW = m_hintsLabel->sizeHint().width();
 
     const bool showTs    = hasTs && (available >= tsW);
@@ -178,4 +237,30 @@ void ChartWidget::showEvent(QShowEvent *e)
 {
     QWidget::showEvent(e);
     updateToolbarLayout();
+}
+
+void ChartWidget::changeEvent(QEvent *e)
+{
+    QWidget::changeEvent(e);
+    if (e->type() == QEvent::ApplicationPaletteChange ||
+        e->type() == QEvent::PaletteChange)
+    {
+        applyCurrentTheme();
+        if (m_view) m_view->viewport()->update();
+        update();
+    }
+}
+
+void ChartWidget::setTheme(ChartTheme::Variant v)
+{
+    m_themeOverride = v;
+    applyCurrentTheme();
+}
+
+void ChartWidget::applyCurrentTheme()
+{
+    const ChartTheme::Variant v = m_themeOverride.value_or(ChartTheme::systemVariant());
+    // Apply to QApplication so every widget in the process (menus, dialogs,
+    // scroll bars, etc.) receives a consistent palette and style sheet.
+    ChartTheme::applyToApplication(v);
 }

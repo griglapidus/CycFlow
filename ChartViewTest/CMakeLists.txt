@@ -12,6 +12,7 @@ add_executable(ChartViewDemo WIN32
     main.cpp
     DataGenerator.h DataGenerator.cpp
     ../ChartWidget/ChartDefs.h ../ChartWidget/ChartDelegate.cpp ../ChartWidget/ChartDelegate.h ../ChartWidget/ChartHeaderView.cpp ../ChartWidget/ChartHeaderView.h ../ChartWidget/ChartModel.cpp ../ChartWidget/ChartModel.h ../ChartWidget/ChartView.cpp ../ChartWidget/ChartView.h ../ChartWidget/ChartWidget.cpp ../ChartWidget/ChartWidget.h
+    ../ChartWidget/ChartTheme.cpp ../ChartWidget/ChartTheme.h
 )
 
 target_link_libraries(ChartViewDemo

@@ -10,8 +10,11 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 add_executable(CbfView WIN32
     main.cpp
-    CbfReader.h CbfReader.cpp
-    MainWindow.h MainWindow.cpp
+    ../resources/Icon.qrc
+    CbfReader.h
+    CbfReader.cpp
+    MainWindow.h
+    MainWindow.cpp
     ../ChartWidget/ChartDefs.h
     ../ChartWidget/ChartDelegate.cpp
     ../ChartWidget/ChartDelegate.h
@@ -23,7 +26,8 @@ add_executable(CbfView WIN32
     ../ChartWidget/ChartView.h
     ../ChartWidget/ChartWidget.cpp
     ../ChartWidget/ChartWidget.h
-    ../resources/Icon.qrc
+    ../ChartWidget/ChartTheme.cpp
+    ../ChartWidget/ChartTheme.h
 )
 
 target_link_libraries(CbfView
