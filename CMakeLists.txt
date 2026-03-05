@@ -39,21 +39,29 @@ if(MSVC)
     endif()
 endif()
 
-# --- Output Directory Configuration ---
-# Set output directories for each standard build configuration
+set(COMPILER_NAME ${CMAKE_CXX_COMPILER_ID})
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ARCH_NAME "x64")
+else()
+    set(ARCH_NAME "x86")
+endif()
+
+set(BASE_OUT_DIR "${CMAKE_SOURCE_DIR}/build/${COMPILER_NAME}_${ARCH_NAME}")
+
+
 foreach(CONFIG IN ITEMS Debug Release RelWithDebInfo MinSizeRel)
     string(TOUPPER ${CONFIG} CONFIG_UPPER)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/bin/${CONFIG}")
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/lib/${CONFIG}")
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_SOURCE_DIR}/build/lib/${CONFIG}")
+
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${BASE_OUT_DIR}/bin/${CONFIG}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${BASE_OUT_DIR}/lib/${CONFIG}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${BASE_OUT_DIR}/lib/${CONFIG}")
 endforeach()
 
-# Fallback base directories (useful for some single-config generators)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/lib")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/lib")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BASE_OUT_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${BASE_OUT_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${BASE_OUT_DIR}/lib")
 
-set(HEADER_DEST_DIR "${CMAKE_SOURCE_DIR}/build/include")
+set(HEADER_DEST_DIR "${BASE_OUT_DIR}/include")
 # --------------------------------------
 
 add_subdirectory(CycLib)
