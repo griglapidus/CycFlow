@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
+#define NOMINMAX
 #include "RecordWriter.h"
 #include "Core/PReg.h"
+#include "Core/CycLogger.h"
 #include <algorithm>
 #include <cstring>
 
@@ -28,6 +30,12 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 
     m_timestampId = PReg::getID("TimeStamp");
 
+    LOG_INFO << "RecordWriter created: batchCapacity=" << m_capacity
+             << " recSize=" << m_recSize
+             << " bufferMemory=" << (m_capacity * m_recSize * 2) << "B"
+             << " blockOnFull=" << (m_blockOnFull ? "true" : "false")
+             << " targetBufferCapacity=" << m_target->capacity();
+
     // Start the background flushing thread
     m_worker = std::thread(&RecordWriter::workerLoop, this);
 }
@@ -44,12 +52,16 @@ void RecordWriter::stop() {
     if (m_worker.joinable()) {
         m_worker.join();
     }
+
+    LOG_INFO << "RecordWriter stopped";
 }
 
 // --- Single Record API ---
 
 Record RecordWriter::nextRecord() {
     if (m_currentIdx >= m_capacity) {
+        LOG_TRACE << "RecordWriter::nextRecord: active buffer full (" << m_capacity
+                  << " records), swapping buffers";
         swapBuffers(true); // Block until background buffer is flushed
     }
 
@@ -74,7 +86,9 @@ void RecordWriter::commitRecord() {
 
 RecordWriter::RecordBatch RecordWriter::nextBatch(size_t maxRecords, bool wait) {
     if (m_currentIdx >= m_capacity) {
+        LOG_DBG << "RecordWriter::nextBatch: active buffer full, swapping (wait=" << wait << ")";
         if (!swapBuffers(wait)) {
+            LOG_WARN << "RecordWriter::nextBatch: swap failed (worker busy, non-blocking)";
             return {nullptr, 0, m_rule, m_recSize}; // Failed to swap (e.g., worker busy and wait=false)
         }
     }
@@ -84,6 +98,11 @@ RecordWriter::RecordBatch RecordWriter::nextBatch(size_t maxRecords, bool wait) 
 
     uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
     std::memset(ptr, 0, count * m_recSize);
+
+    LOG_DBG << "RecordWriter::nextBatch: providing " << count
+            << " record slots (requested=" << maxRecords
+            << " available=" << available << ")";
+
     return {ptr, count, m_rule, m_recSize};
 }
 
@@ -100,8 +119,14 @@ void RecordWriter::commitBatch(size_t count) {
             }
         }
         m_currentIdx += count;
+
+        LOG_DBG << "RecordWriter::commitBatch: committed " << count
+                << " records, bufferFill=" << m_currentIdx << "/" << m_capacity;
     } else {
         // Safety fallback in case of incorrect count provided by the user
+        LOG_WARN << "RecordWriter::commitBatch: count " << count
+                 << " exceeds remaining capacity (idx=" << m_currentIdx
+                 << " cap=" << m_capacity << "), clamping to full";
         m_currentIdx = m_capacity;
     }
 }
@@ -126,9 +151,10 @@ bool RecordWriter::swapBuffers(bool blocking) {
     std::swap(m_activeBuf, m_bgBuf);
     m_bgCount = m_currentIdx;
 
+    LOG_DBG << "RecordWriter::swapBuffers: swapped, bgCount=" << m_bgCount
+            << " (blocking=" << blocking << ")";
+
     // Reset active index.
-    // ZERO-MEMSET OPTIMIZATION: We do not clear the buffer memory here.
-    // We only rely on m_currentIdx to track valid records.
     m_currentIdx = 0;
 
     m_hasWork = true;
@@ -142,6 +168,7 @@ bool RecordWriter::swapBuffers(bool blocking) {
 
 void RecordWriter::flush() {
     if (m_currentIdx > 0) {
+        LOG_DBG << "RecordWriter::flush: flushing " << m_currentIdx << " pending records";
         swapBuffers(true);
     }
 
@@ -155,6 +182,8 @@ void RecordWriter::flush() {
 // --- Worker Thread ---
 
 void RecordWriter::workerLoop() {
+    LOG_DBG << "RecordWriter::workerLoop: background thread started";
+
     while (m_running.load(std::memory_order_acquire)) {
         std::vector<uint8_t>* bufToFlush = nullptr;
         size_t countToFlush = 0;
@@ -174,10 +203,16 @@ void RecordWriter::workerLoop() {
         }
 
         if (countToFlush > 0) {
+            LOG_DBG << "RecordWriter::workerLoop: flushing chunk of " << countToFlush
+                    << " records (" << (countToFlush * m_recSize) << "B)"
+                    << " to target buffer (capacity=" << m_target->capacity() << ")";
+
             if (!m_blockOnFull) {
                 // Non-blocking write: push directly to RecBuffer.
-                // Oldest unread data will be overwritten if the buffer is full.
                 m_target->push(bufToFlush->data(), countToFlush);
+
+                LOG_TRACE << "RecordWriter::workerLoop: non-blocking push complete"
+                          << " count=" << countToFlush;
             } else {
                 // Blocking write: wait for readers to free up space
                 size_t writtenSoFar = 0;
@@ -187,6 +222,9 @@ void RecordWriter::workerLoop() {
                     size_t available = m_target->getAvailableWriteSpace();
 
                     if (available == 0) {
+                        LOG_TRACE << "RecordWriter::workerLoop: target buffer full, waiting for space"
+                                  << " (written " << writtenSoFar << "/" << countToFlush << ")";
+
                         m_target->waitForSpace([this]() {
                             return !m_running.load(std::memory_order_acquire);
                         });
@@ -202,6 +240,10 @@ void RecordWriter::workerLoop() {
 
                     m_target->push(dataPtr + (writtenSoFar * m_recSize), chunk);
                     writtenSoFar += chunk;
+
+                    LOG_TRACE << "RecordWriter::workerLoop: blocking push chunk=" << chunk
+                              << " writtenSoFar=" << writtenSoFar << "/" << countToFlush
+                              << " availableSpace=" << available;
                 }
             }
         }
@@ -216,6 +258,8 @@ void RecordWriter::workerLoop() {
         // Notify flush() or swapBuffers(true) that the background buffer is free
         m_cv_done.notify_all();
     }
+
+    LOG_DBG << "RecordWriter::workerLoop: background thread exiting";
 }
 
 } // namespace cyc

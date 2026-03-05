@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
+#define NOMINMAX
 #include "RecordReader.h"
+#include "Core/CycLogger.h"
 #include <algorithm>
 
 namespace cyc {
@@ -39,6 +41,14 @@ RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     m_activeBuf = &m_bufferA;
     m_bgBuf = &m_bufferB;
 
+    LOG_INFO << "RecordReader created: batchCapacity=" << m_capacity
+             << " recSize=" << m_recSize
+             << " bufferMemory=" << (m_capacity * m_recSize * 2) << "B"
+             << " targetBufferCapacity=" << m_target->capacity()
+             << " initialCursor=" << m_readerCursor.load()
+             << " totalWritten=" << totalWritten
+             << " currentBufferSize=" << currentBufferSize;
+
     m_worker = std::thread(&RecordReader::workerLoop, this);
 }
 
@@ -58,11 +68,14 @@ uint64_t RecordReader::getCursor() const {
 void RecordReader::stop() {
     bool expected = true;
     if (m_running.compare_exchange_strong(expected, false)) {
+        LOG_INFO << "RecordReader::stop: stopping reader"
+                 << " cursor=" << m_readerCursor.load();
         m_cv_worker.notify_all();
         m_cv_user.notify_all();
         if (m_worker.joinable()) {
             m_worker.join();
         }
+        LOG_INFO << "RecordReader stopped";
     }
 }
 
@@ -71,12 +84,18 @@ void RecordReader::finish() {
 
     m_finishing = true;
     m_finishTarget = m_target->getTotalWritten();
+
+    LOG_INFO << "RecordReader::finish: finishing at target=" << m_finishTarget
+             << " currentCursor=" << m_readerCursor.load()
+             << " remaining=" << (m_finishTarget - m_readerCursor.load());
+
     m_cv_worker.notify_all();
 
     if (m_worker.joinable()) {
         m_worker.join();
     }
     m_running.store(false);
+    LOG_INFO << "RecordReader finished";
 }
 
 bool RecordReader::swapBuffers() {
@@ -88,6 +107,8 @@ bool RecordReader::swapBuffers() {
     std::swap(m_activeBuf, m_bgBuf);
     m_activeCount = m_bgCount;
     m_activeIdx = 0;
+
+    LOG_DBG << "RecordReader::swapBuffers: swapped, activeCount=" << m_activeCount;
 
     // Reset background state. Note: No memset is performed here for maximum throughput.
     m_bgCount = 0;
@@ -139,6 +160,10 @@ Record RecordReader::nextRecord() {
 }
 
 void RecordReader::workerLoop() {
+    LOG_DBG << "RecordReader::workerLoop: background thread started"
+            << " capacity=" << m_capacity
+            << " targetCapacity=" << m_target->capacity();
+
     while (m_running.load()) {
         size_t countToRead = 0;
 
@@ -158,6 +183,9 @@ void RecordReader::workerLoop() {
             if (!m_running.load()) return;
 
             if (m_finishing && m_readerCursor.load() >= m_finishTarget) {
+                LOG_DBG << "RecordReader::workerLoop: finish target reached"
+                        << " cursor=" << m_readerCursor.load()
+                        << " finishTarget=" << m_finishTarget;
                 m_running.store(false);
                 m_cv_user.notify_all();
                 return;
@@ -176,16 +204,32 @@ void RecordReader::workerLoop() {
         // If the reader is too slow and data was overwritten in the circular buffer,
         // skip to the oldest available valid data to recover gracefully.
         if (lag > currentBufferSize) {
+            uint64_t oldCursor = cursor;
             cursor = totalWritten - currentBufferSize;
             lag = currentBufferSize;
+
+            LOG_WARN << "RecordReader::workerLoop: reader lagging behind, data was overwritten"
+                     << " skippedRecords=" << (cursor - oldCursor)
+                     << " oldCursor=" << oldCursor
+                     << " newCursor=" << cursor
+                     << " bufferSize=" << currentBufferSize;
         }
 
         countToRead = std::min(static_cast<size_t>(lag), m_capacity);
+
+        LOG_TRACE << "RecordReader::workerLoop: reading chunk"
+                  << " cursor=" << cursor
+                  << " countToRead=" << countToRead
+                  << " lag=" << lag
+                  << " totalWritten=" << totalWritten
+                  << " bufferSize=" << currentBufferSize;
 
         // Fetch data directly into the background buffer
         size_t actuallyRead = m_target->readFromGlobal(cursor, m_bgBuf->data(), countToRead);
 
         if (actuallyRead == 0 && countToRead > 0) {
+            LOG_TRACE << "RecordReader::workerLoop: readFromGlobal returned 0"
+                      << " (cursor possibly invalidated), retrying";
             continue; // Cursor might have been concurrently invalidated, retry next loop
         }
 
@@ -200,10 +244,17 @@ void RecordReader::workerLoop() {
             std::lock_guard<std::mutex> lock(m_mtx);
             m_bgCount = actuallyRead;
             m_bgIsFull = true;
+
+            LOG_DBG << "RecordReader::workerLoop: bg buffer ready"
+                    << " actuallyRead=" << actuallyRead
+                    << " (" << (actuallyRead * m_recSize) << "B)"
+                    << " newCursor=" << m_readerCursor.load();
         }
 
         m_cv_user.notify_one();
     }
+
+    LOG_DBG << "RecordReader::workerLoop: background thread exiting";
 }
 
 } // namespace cyc

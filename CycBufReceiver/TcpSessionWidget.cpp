@@ -1,10 +1,11 @@
 #include "TcpSessionWidget.h"
 #include <QVBoxLayout>
+#include <QString>
 
 TcpSessionWidget::TcpSessionWidget(const ConnectionConfig& config, QWidget *parent)
     : QWidget(parent), m_config(config)
 {
-    setWindowTitle(QString("%1 [%2:%3]").arg(config.bufferName, config.host, config.port));
+    setWindowTitle(QString("%1 [%2:%3]").arg(config.bufferName, config.host).arg(config.port));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);

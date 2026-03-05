@@ -92,6 +92,8 @@ void ChartConsumer::onConsumeStart() {
         }
     }
 
+    m_lastFlushTime = std::chrono::steady_clock::now();
+
     emit headerParsed(m_configs);
 }
 
@@ -123,15 +125,25 @@ void ChartConsumer::consumeRecord(const cyc::Record& rec) {
 
     m_recordsAccumulated++;
 
-    if (m_recordsAccumulated >= m_batchSize) {
-        emit batchReady(m_currentBatch);
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastFlushTime);
 
-        m_currentBatch.clear();
-        for (const auto& cfg : m_configs) {
-            m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
-        }
-        m_recordsAccumulated = 0;
+    if (elapsed.count() >= m_flushIntervalMs) {
+        flushBatch();
     }
+}
+
+void ChartConsumer::flushBatch() {
+    if (m_recordsAccumulated == 0) return;
+
+    emit batchReady(m_currentBatch);
+
+    m_currentBatch.clear();
+    for (const auto& cfg : m_configs) {
+        m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
+    }
+    m_recordsAccumulated = 0;
+    m_lastFlushTime = std::chrono::steady_clock::now();
 }
 
 void ChartConsumer::onConsumeStop() {

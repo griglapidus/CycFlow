@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QVector>
 #include <QList>
+#include <QTimer>
 #include <memory>
 
 #include "AppConfig.h"
@@ -18,6 +19,14 @@ public:
     explicit ChartConsumer(std::shared_ptr<cyc::RecBuffer> buffer, QObject *parent = nullptr);
     ~ChartConsumer() override;
 
+    /**
+     * @brief Sets the maximum interval between UI updates (in ms).
+     *
+     * The consumer will emit batchReady() no less frequently than this,
+     * as long as there is at least one accumulated record.
+     */
+    void setFlushIntervalMs(int ms) { m_flushIntervalMs = ms; }
+
 signals:
     void headerParsed(QVector<CbfSeriesConfig> configs);
     void batchReady(QList<SeriesBatch> batch);
@@ -29,13 +38,17 @@ protected:
 
 private:
     SampleType mapFieldType(cyc::DataType cbfType);
+    void flushBatch();
 
     std::shared_ptr<cyc::RecBuffer> m_buffer;
     QVector<CbfSeriesConfig> m_configs;
     QList<SeriesBatch> m_currentBatch;
 
     int m_recordsAccumulated = 0;
-    const int m_batchSize = 1000;
+    int m_flushIntervalMs = 25;
+
+    /// Monotonic clock snapshot of the last flush (or start).
+    std::chrono::steady_clock::time_point m_lastFlushTime;
 };
 
 #endif // CHARTCONSUMER_H

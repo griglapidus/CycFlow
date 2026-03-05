@@ -20,6 +20,8 @@ set(SOURCES
     Cbf/CbfFile.cpp
     Tcp/TcpServer.cpp
     Tcp/TcpServiceClient.cpp
+    Tcp/TcpDataSender.cpp
+    Tcp/TcpDataReceiver.cpp
 )
 
 set(HEADERS
@@ -32,6 +34,7 @@ set(HEADERS
     Core/Record.h
     Core/CircularBuffer.h
     Core/DynamicChunkBuffer.h
+    Core/IRecBufferClient.h
     RecordWriter.h
     RecordReader.h
     RecordConsumer.h
@@ -45,12 +48,13 @@ set(HEADERS
     Tcp/MessageUtils.h
     Tcp/TcpServer.h
     Tcp/TcpServiceClient.h
+    Tcp/TcpDataSender.h
+    Tcp/TcpDataReceiver.h
 )
 
 add_library(CycLib ${SOURCES} ${HEADERS}
-    Tcp/TcpDataSender.h Tcp/TcpDataSender.cpp
-    Tcp/TcpDataReceiver.h Tcp/TcpDataReceiver.cpp
-    Core/IRecBufferClient.h)
+    Core/CycLogger.cpp
+    Core/CycLogger.h)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 
