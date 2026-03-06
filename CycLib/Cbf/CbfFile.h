@@ -12,6 +12,7 @@
 #include <fstream>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 enum class CbfMode {
     Read,
@@ -112,6 +113,7 @@ private:
     size_t m_writtenBytesInSection;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_CBFFILE_H

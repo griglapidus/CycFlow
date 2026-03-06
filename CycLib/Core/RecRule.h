@@ -11,6 +11,7 @@
 #include <cstddef>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @struct BitRef
@@ -147,6 +148,7 @@ private:
     std::unordered_map<int, BitRef> m_bitCache;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_RECRULE_H

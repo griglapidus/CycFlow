@@ -10,6 +10,7 @@
 #include <asio.hpp>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class TcpServer
@@ -45,6 +46,7 @@ private:
     std::mutex m_sendersMtx;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_TCPSERVER_H

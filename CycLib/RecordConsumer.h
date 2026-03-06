@@ -8,6 +8,7 @@
 #include "RecordReader.h"
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordConsumer
@@ -91,6 +92,7 @@ protected:
     void workerLoop() override;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_RECORDCONSUMER_H

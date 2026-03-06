@@ -9,7 +9,7 @@
 #include <fstream>
 
 namespace cyc {
-
+CYCLIB_SUPPRESS_C4251
 /**
  * @class CsvWriter
  * @brief Writes data records from a RecBuffer to a CSV file.
@@ -87,6 +87,7 @@ private:
     std::vector<PAttr> m_cachedAttrs;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_CSVWRITER_H

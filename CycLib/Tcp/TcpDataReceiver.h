@@ -11,6 +11,7 @@
 #include <string>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class TcpDataReceiver
@@ -70,6 +71,7 @@ private:
     bool m_connected;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_TCPDATARECEIVER_H

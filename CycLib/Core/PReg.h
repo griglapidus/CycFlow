@@ -11,6 +11,7 @@
 #include <shared_mutex>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class PReg
@@ -44,6 +45,7 @@ private:
     mutable std::shared_mutex m_mtx;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_PREG_H

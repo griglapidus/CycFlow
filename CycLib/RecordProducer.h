@@ -10,6 +10,7 @@
 #include "Core/RecRule.h"
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordProducer
@@ -137,6 +138,7 @@ protected:
     void workerLoop() override;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_RECORDPRODUCER_H

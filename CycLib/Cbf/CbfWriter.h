@@ -8,6 +8,7 @@
 #include "CbfFile.h"
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class CbfWriter
@@ -60,6 +61,7 @@ private:
     CbfFile m_cbfFile;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_CBFWRITER_H

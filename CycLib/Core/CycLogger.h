@@ -13,7 +13,6 @@
 #include <thread>
 #include <atomic>
 #include <string>
-#include <memory>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -165,7 +164,15 @@ public:
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                       now.time_since_epoch()) % 1000;
 
-        m_buffer << "[" << std::put_time(std::localtime(&time), "%T")
+        // Thread-safe localtime resolution
+        std::tm tm_snapshot;
+#ifdef _WIN32
+        localtime_s(&tm_snapshot, &time);
+#else
+        localtime_r(&time, &tm_snapshot);
+#endif
+
+        m_buffer << "[" << std::put_time(&tm_snapshot, "%T")
                  << "." << std::setfill('0') << std::setw(3) << ms.count() << "] ";
 
         // Thread ID

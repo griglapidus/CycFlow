@@ -28,4 +28,12 @@
 #  endif
 #endif
 
+#ifdef _MSC_VER
+#  define CYCLIB_SUPPRESS_C4251  __pragma(warning(push)) __pragma(warning(disable: 4251))
+#  define CYCLIB_RESTORE_C4251   __pragma(warning(pop))
+#else
+#  define CYCLIB_SUPPRESS_C4251
+#  define CYCLIB_RESTORE_C4251
+#endif
+
 #endif // CYCLIB_GLOBAL_H

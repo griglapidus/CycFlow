@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Grigorii Lapidus
 
+#define _CRT_SECURE_NO_WARNINGS
 #include "CbfFile.h"
 #include <cstring>
 

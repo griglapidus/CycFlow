@@ -13,6 +13,7 @@
 #include <functional>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecBuffer
@@ -122,6 +123,7 @@ private:
     mutable uint64_t m_phantomReadCursor;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_RECBUFFER_H

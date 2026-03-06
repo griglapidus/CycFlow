@@ -139,7 +139,7 @@ void ChartConsumer::flushBatch() {
     emit batchReady(m_currentBatch);
 
     m_currentBatch.clear();
-    for (const auto& cfg : m_configs) {
+    for (const auto& cfg : std::as_const(m_configs)) {
         m_currentBatch.append({cfg.name, makeSampleBuffer(cfg.type)});
     }
     m_recordsAccumulated = 0;

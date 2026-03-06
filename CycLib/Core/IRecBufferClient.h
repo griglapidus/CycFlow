@@ -5,6 +5,7 @@
 #define CYC_IRECBUFFERCLIENT_H
 
 #include <cstdint>
+#include "CycLib_global.h"
 
 namespace cyc {
 
@@ -14,7 +15,7 @@ namespace cyc {
  *
  * Defines the contract between the circular buffer and its consumers (e.g., RecordReader).
  */
-class IRecBufferClient {
+class CYCLIB_EXPORT IRecBufferClient {
 public:
     virtual ~IRecBufferClient() = default;
 

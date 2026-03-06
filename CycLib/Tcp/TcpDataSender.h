@@ -9,6 +9,7 @@
 #include <asio.hpp>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class TcpDataSender
@@ -38,6 +39,7 @@ private:
     asio::ip::tcp::socket m_socket;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_TCPDATASENDER_H

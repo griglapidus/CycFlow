@@ -10,6 +10,7 @@
 #include <thread>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordWriter
@@ -120,6 +121,7 @@ private:
     bool m_hasWork;                      ///< Flag indicating the worker has data to process.
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_RECORDWRITER_H

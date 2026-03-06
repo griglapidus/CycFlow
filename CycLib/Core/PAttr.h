@@ -10,6 +10,7 @@
 #include <string>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @struct PAttr
@@ -82,6 +83,7 @@ struct CYCLIB_EXPORT PAttr {
     [[nodiscard]] size_t getSize() const;
 };
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_PATTR_H

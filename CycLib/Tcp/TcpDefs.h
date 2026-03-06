@@ -4,9 +4,11 @@
 #ifndef CYC_TCPDEFS_H
 #define CYC_TCPDEFS_H
 
+#include "Core/CycLib_global.h"
 #include <cstdint>
 
 namespace cyc {
+CYCLIB_SUPPRESS_C4251
 
 /**
  * @brief TCP message types for the CycLib protocol.
@@ -35,6 +37,7 @@ struct TcpHeader {
 };
 #pragma pack(pop)
 
+CYCLIB_RESTORE_C4251
 } // namespace cyc
 
 #endif // CYC_TCPDEFS_H
