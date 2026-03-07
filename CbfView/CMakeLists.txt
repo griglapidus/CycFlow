@@ -10,7 +10,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 add_executable(CbfView WIN32
     main.cpp
-    ../resources/Icon.qrc
+    ../resources/CbfView.qrc
     CbfReader.h
     CbfReader.cpp
     MainWindow.h

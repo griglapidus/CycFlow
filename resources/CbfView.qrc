@@ -1,0 +1,31 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="icon">icon_256.png</file>
+    </qresource>
+	<qresource prefix="/toolbar">
+        <file>H_Dark/H_H_In.svg</file>
+        <file>H_Dark/H_H_Out.svg</file>
+        <file>H_Dark/H_V_Auto.svg</file>
+        <file>H_Dark/H_V_In.svg</file>
+        <file>H_Dark/H_V_Out.svg</file>
+        <file>H_Dark/H_V_Reset.svg</file>
+        <file>V_Dark/V_H_In.svg</file>
+        <file>V_Dark/V_H_Out.svg</file>
+        <file>V_Dark/V_V_Auto.svg</file>
+        <file>V_Dark/V_V_In.svg</file>
+        <file>V_Dark/V_V_Out.svg</file>
+        <file>V_Dark/V_V_Reset.svg</file>
+        <file>H_Light/H_H_In.svg</file>
+        <file>H_Light/H_H_Out.svg</file>
+        <file>H_Light/H_V_Auto.svg</file>
+        <file>H_Light/H_V_In.svg</file>
+        <file>H_Light/H_V_Out.svg</file>
+        <file>H_Light/H_V_Reset.svg</file>
+        <file>V_Light/V_H_In.svg</file>
+        <file>V_Light/V_H_Out.svg</file>
+        <file>V_Light/V_V_Auto.svg</file>
+        <file>V_Light/V_V_In.svg</file>
+        <file>V_Light/V_V_Out.svg</file>
+        <file>V_Light/V_V_Reset.svg</file>
+    </qresource>
+</RCC>

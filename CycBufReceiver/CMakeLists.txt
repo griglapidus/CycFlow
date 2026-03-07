@@ -10,7 +10,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 add_executable(CycBufReceiver WIN32
     main.cpp
-    ../resources/Icon_dark.qrc
+    ../resources/CycBufReceiver.qrc
     MainWindow.h
     MainWindow.cpp
     ../ChartWidget/ChartDefs.h

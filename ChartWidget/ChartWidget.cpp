@@ -25,7 +25,7 @@ namespace {
 constexpr int kScrollStepDivisor = 30;
 
 /// Toolbar action icon size (square, pixels).
-constexpr int kToolbarIconSize = 14;
+constexpr int kToolbarIconSize = 40;
 
 /// Toolbar font size (Consolas), in points.
 constexpr int kToolbarFontPt = 9;
@@ -112,7 +112,6 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
                                 "QToolButton {"
                                 "    border: 1px solid palette(mid);"
                                 "    border-radius: %1px;"
-                                "    padding: %2px %3px;"
                                 "    font: %4pt 'Consolas';"
                                 "}"
                                 "QToolButton:checked  { background: palette(highlight); }"
@@ -129,7 +128,9 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->setStyleSheet(tbStyle);
 
     auto *actXIn  = new QAction("X +", m_tb);
-    auto *actXOut = new QAction("X \xe2\x88\x92", m_tb);  // X −
+    actXIn->setProperty("iconName", "H_H_Out.svg");
+    auto *actXOut = new QAction("X \xe2\x88\x92", m_tb);
+    actXOut->setProperty("iconName", "H_H_In.svg");
     connect(actXIn,  &QAction::triggered, m_model, &ChartModel::zoomXIn);
     connect(actXOut, &QAction::triggered, m_model, &ChartModel::zoomXOut);
     m_tb->addAction(actXIn);
@@ -137,7 +138,9 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actYIn  = new QAction("Y +", m_tb);
-    auto *actYOut = new QAction("Y \xe2\x88\x92", m_tb);  // Y −
+    actYIn->setProperty("iconName", "H_V_Out.svg");
+    auto *actYOut = new QAction("Y \xe2\x88\x92", m_tb);
+    actYOut->setProperty("iconName", "H_V_In.svg");
     connect(actYIn,  &QAction::triggered, m_model, &ChartModel::zoomYIn);
     connect(actYOut, &QAction::triggered, m_model, &ChartModel::zoomYOut);
     m_tb->addAction(actYIn);
@@ -145,6 +148,7 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actAutoFit = new QAction("Auto Y", m_tb);
+    actAutoFit->setProperty("iconName", "H_V_Auto.svg");
     actAutoFit->setCheckable(true);
     actAutoFit->setChecked(false);
     actAutoFit->setToolTip("Auto-fit Y to the visible X range");
@@ -154,6 +158,7 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actReset = new QAction("Reset", m_tb);
+    actReset->setProperty("iconName", "H_V_Reset.svg");
     actReset->setToolTip("Reset all display parameters");
     connect(actReset, &QAction::triggered, m_model, &ChartModel::resetAllDisplayParams);
     m_tb->addAction(actReset);
@@ -328,4 +333,21 @@ void ChartWidget::applyCurrentTheme()
     // Re-resolve theme-managed series colors to the new variant.
     // Manually pinned colors (colorIndex == kManualColor) are left untouched.
     if (m_model) m_model->reapplySeriesColors(v);
+
+    // --- Update toolbar icons dynamically ---
+    if (m_tb) {
+        // Determine if the current theme is dark based on window background lightness.
+        // Alternatively, if your ChartTheme::Variant provides a direct check
+        // (e.g., v == ChartTheme::Variant::Dark), you can use that instead.
+        const bool isDark = qApp->palette().color(QPalette::Window).lightness() < 128;
+        const QString themeDir = isDark ? QStringLiteral("H_Dark") : QStringLiteral("H_Light");
+
+        for (QAction *act : m_tb->actions()) {
+            const QString iconName = act->property("iconName").toString();
+            if (!iconName.isEmpty()) {
+                const QString iconPath = QStringLiteral(":/toolbar/%1/%2").arg(themeDir, iconName);
+                act->setIcon(QIcon(iconPath));
+            }
+        }
+    }
 }
