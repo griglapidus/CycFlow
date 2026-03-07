@@ -33,12 +33,6 @@ constexpr int kToolbarFontPt = 9;
 /// Toolbar button border radius (pixels).
 constexpr int kToolbarBorderRadius = 3;
 
-/// Horizontal padding inside toolbar buttons (pixels).
-constexpr int kToolbarButtonPadH = 7;
-
-/// Vertical padding inside toolbar buttons (pixels).
-constexpr int kToolbarButtonPadV = 2;
-
 /// Extra horizontal padding added to the minimum timestamp label width (pixels).
 constexpr int kTsLabelMinWidthPad = 20;
 
@@ -112,13 +106,11 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
                                 "QToolButton {"
                                 "    border: 1px solid palette(mid);"
                                 "    border-radius: %1px;"
-                                "    font: %4pt 'Consolas';"
+                                "    font: %2pt 'Consolas';"
                                 "}"
                                 "QToolButton:checked  { background: palette(highlight); }"
                                 "QToolButton:disabled { color: palette(mid); }")
                                 .arg(kToolbarBorderRadius)
-                                .arg(kToolbarButtonPadV)
-                                .arg(kToolbarButtonPadH)
                                 .arg(kToolbarFontPt);
 
     m_tb = new QToolBar(this);

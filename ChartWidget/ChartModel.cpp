@@ -285,16 +285,19 @@ void ChartModel::setSeriesRowHeight(const QString &name, int px)
     if (row >= 0) emit layoutChanged();
 }
 
-void ChartModel::setSeriesYScale(const QString &name, float scale)
+void ChartModel::setSeriesViewRange(const QString &name, double lo, double hi)
 {
-    scale = qMax(kMinYScale, scale);
     int row = -1;
     {
         QWriteLocker lk(&m_lock);
         auto it = m_data.find(name);
         if (it == m_data.end()) return;
-        if (qFuzzyCompare(it->yScale, scale)) return;
-        it->yScale = scale;
+        // Guard against no-op (both NaN → both NaN is also a no-op).
+        const bool sameNaN = (qIsNaN(it->viewLo) && qIsNaN(lo)) &&
+                             (qIsNaN(it->viewHi) && qIsNaN(hi));
+        if (!sameNaN && it->viewLo == lo && it->viewHi == hi) return;
+        it->viewLo = lo;
+        it->viewHi = hi;
         row = m_rowIndex.value(name, -1);
     }
     if (row >= 0) {
@@ -303,28 +306,19 @@ void ChartModel::setSeriesYScale(const QString &name, float scale)
     }
 }
 
-void ChartModel::setSeriesYOffset(const QString &name, int px)
+void ChartModel::resetSeriesView(const QString &name)
 {
-    int row = -1;
-    {
-        QWriteLocker lk(&m_lock);
-        auto it = m_data.find(name);
-        if (it == m_data.end()) return;
-        if (it->yOffset == px) return;
-        it->yOffset = px;
-        row = m_rowIndex.value(name, -1);
-    }
-    if (row >= 0) {
-        emit dataChanged(index(row, 0), index(row, 0));
-        emit seriesDisplayChanged(name, row);
-    }
+    setSeriesViewRange(name, qQNaN(), qQNaN());
 }
 
 void ChartModel::resetAllDisplayParams()
 {
     {
         QWriteLocker lk(&m_lock);
-        for (auto &s : m_data) { s.yScale = 1.0f; s.yOffset = 0; }
+        for (auto &s : m_data) {
+            s.viewLo = qQNaN();
+            s.viewHi = qQNaN();
+        }
     }
     if (!m_order.isEmpty())
         emit dataChanged(index(0, 0), index(m_order.size()-1, 0));

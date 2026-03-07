@@ -10,6 +10,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QTimeZone>
+#include <cmath>
 
 ChartHeaderView::ChartHeaderView(ChartModel *model, QWidget *parent)
     : QHeaderView(Qt::Vertical, parent), m_model(model)
@@ -396,14 +397,20 @@ void ChartHeaderView::paintRow(QPainter *p, const QPalette &pal, const QRect &r,
     p->drawText(tr, Qt::AlignTop | Qt::AlignLeft,
                 p->fontMetrics().elidedText(nameStr, Qt::ElideRight, tr.width()));
 
-    // Y-scale annotation — uses Link colour (accent, readable in both themes).
-    if (!qFuzzyCompare(s.yScale, 1.0f)) {
-        int digs = qMax(0, static_cast<int>(std::log10(s.yScale)) + 1);
-        QFont fs("Consolas", 10);
+    // View-range annotation -- shown when the user has explicitly set Y bounds
+    // (zoom/pan/fit). Hidden in auto-mode (NaN) to avoid visual clutter.
+    // Uses Link colour (accent, readable in both themes).
+    if (!qIsNaN(s.viewLo) && !qIsNaN(s.viewHi) && s.viewHi > s.viewLo) {
+        auto fmtBound = [](double v) -> QString {
+            if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
+                return QString::number(v, 'e', 2);
+            return QString::number(v, 'g', 4);
+        };
+        QFont fs("Consolas", 9);
         p->setFont(fs);
         p->setPen(pal.color(QPalette::Link));
         p->drawText(tr, Qt::AlignTop | Qt::AlignRight,
-                    QString("×%1").arg(s.yScale, 0, 'f', qMax(0, 3 - digs)));
+                    QString("[%1…%2]").arg(fmtBound(s.viewLo), fmtBound(s.viewHi)));
     }
 
     const int nameBottom = tr.top() + QFontMetrics(fn).height() + 3;

@@ -173,26 +173,21 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
     p->setPen(QPen(cp.divider, 1));
     p->drawLine(clipR.left(), r.bottom(), fullRight, r.bottom());
 
-    const double loD = boundsToDouble(s.minVal);
-    const double hiD = boundsToDouble(s.maxVal);
+    // Use the explicit view bounds if set, otherwise the running data bounds.
+    const auto [loD, hiD] = effectiveViewBounds(s);
     if (loD >= hiD || !std::isfinite(loD) || !std::isfinite(hiD)) return;
 
-    const int chartH = r.height() - kChartVPad;
+    const int    chartH   = r.height() - kChartVPad;
     if (chartH <= 0) return;
-    const double centerY = r.top() + r.height() * 0.5;
-    const double denom   = chartH * static_cast<double>(s.yScale);
-    const double span    = hiD - loD;
+    const double chartTop = r.top() + kChartVPad * 0.5; // top of the usable chart area
+    const double span     = hiD - loD;
 
-    // Compute the visible value range for this row.
-    auto valAtY = [&](double y) {
-        return loD + (0.5 - (y - centerY - s.yOffset) / denom) * span;
-    };
-    const double visHi = valAtY(r.top());
-    const double visLo = valAtY(r.bottom());
-    if (visHi <= visLo) return;
+    // The visible value range is exactly [loD, hiD] — no yScale/yOffset math needed.
+    const double visLo = loD;
+    const double visHi = hiD;
 
     // Choose a "nice" grid step based on ~kGridTargetDivisions visible intervals.
-    const double rawStep = (visHi - visLo) / kGridTargetDivisions;
+    const double rawStep = span / kGridTargetDivisions;
     if (rawStep <= 0 || !std::isfinite(rawStep)) return;
     const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
     double step = mag;
@@ -205,8 +200,13 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
     const int labelH = fm.height();
     int       prevLy = INT_MIN;
 
-    for (double v = std::ceil(visLo / step) * step; v <= visHi + step * 0.5; v += step) {
-        const double yLine = centerY + (0.5 - (v - loD) / span) * denom + s.yOffset;
+    const double firstGrid = std::ceil(visLo / step) * step;
+    const int    gridCount = static_cast<int>(std::floor((visHi - firstGrid) / step + 0.5)) + 1;
+    for (int k = 0; k < gridCount; ++k) {
+        const double v     = firstGrid + k * step;
+        // ratio=0 → bottom of chart (loD), ratio=1 → top (hiD)
+        const double ratio = (v - loD) / span;
+        const double yLine = chartTop + (1.0 - ratio) * chartH;
         if (yLine < r.top() - 0.5 || yLine > r.bottom() + 0.5) continue;
 
         // Horizontal grid line across the full viewport width.
@@ -257,14 +257,21 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     const int dataSize = sampleCount(s.data);
     if (dataSize == 0) return;
 
-    const double loD = boundsToDouble(s.minVal);
-    const double hiD = boundsToDouble(s.maxVal);
-    if (loD > hiD) return;
+    // Resolve the Y axis range. viewLo/viewHi are used when explicitly set;
+    // otherwise fall back to the running min/max. This is the key fix:
+    // new samples change minVal/maxVal but NOT viewLo/viewHi, so the chart
+    // does not rescale or jump when data with growing range arrives.
+    // Note: split into two named variables (not a structured binding) so that
+    // the C++17 lambdas below can capture them without a C++20 extension.
+    const auto   viewBounds = effectiveViewBounds(s);
+    const double loD        = viewBounds.first;
+    const double hiD        = viewBounds.second;
+    if (loD >= hiD || !std::isfinite(loD) || !std::isfinite(hiD)) return;
 
-    const int chartH = cell.height() - kChartVPad;
+    const int    chartH   = cell.height() - kChartVPad;
     if (chartH <= 0) return;
-    const double centerY = cell.top() + cell.height() * 0.5;
-    const double denom   = chartH * static_cast<double>(s.yScale);
+    const double chartTop = cell.top() + kChartVPad * 0.5;
+    const double span     = hiD - loD;
 
     // Clamp the horizontal clip to the cell bounds.
     const int cLeft  = qMax(clipXLeft,  cell.left());
@@ -278,10 +285,14 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     const int last  = qMin(dataSize - 1, static_cast<int>((dataRight + pps) / pps));
     if (first > last) return;
 
+    // Converts sample index → scene point using the value-space Y bounds.
+    // Values outside [loD, hiD] produce y coordinates outside the cell rect
+    // (graph goes off the edge when zoomed in), which is desired behaviour.
     auto toPoint = [&](int i) -> QPointF {
-        const double ratio = sampleRatio(s.data, i, s.minVal, s.maxVal);
+        const double v     = sampleAt(s.data, i);
+        const double ratio = (span > 0.0) ? (v - loD) / span : 0.5;
         return { cell.left() + i * static_cast<double>(pps),
-                centerY + (0.5 - ratio) * denom + s.yOffset };
+                chartTop    + (1.0 - ratio) * chartH };
     };
 
     p->setRenderHint(QPainter::Antialiasing, true);
@@ -313,30 +324,31 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
         QPolygonF poly;
         poly.reserve(visPixels * 2);
 
+        // Converts a normalised ratio to a Y scene coordinate.
+        auto ratioToY = [&](double ratio) {
+            return chartTop + (1.0 - ratio) * chartH;
+        };
+
         auto emitPixel = [&](const PixelData &pd) {
             if (!pd.used) return;
             const double x  = cLeft + pd.px + 0.5;
-            const double yX = centerY + (0.5 - pd.exitRatio) * denom + s.yOffset;
-            const double yN = centerY + (0.5 - pd.pMin)      * denom + s.yOffset;
-            const double yP = centerY + (0.5 - pd.pMax)      * denom + s.yOffset;
-            poly.append(QPointF(x, yP));
-            poly.append(QPointF(x, yN));
-            poly.append(QPointF(x, yX));
+            poly.append(QPointF(x, ratioToY(pd.pMax)));
+            poly.append(QPointF(x, ratioToY(pd.pMin)));
+            poly.append(QPointF(x, ratioToY(pd.exitRatio)));
         };
 
         for (int i = first; i <= last; ++i) {
             const int    px    = qBound(0, static_cast<int>(i * pps) - iDataLeft, visPixels);
-            const double ratio = sampleRatio(s.data, i, s.minVal, s.maxVal);
+            const double v     = sampleAt(s.data, i);
+            const double ratio = (span > 0.0) ? (v - loD) / span : 0.5;
 
             if (px != cur.px) {
                 if (cur.used) {
                     if (prev.used) {
                         const double xP = cLeft + prev.px + 0.5;
                         const double xC = cLeft + px + 0.5;
-                        const double yP = centerY + (0.5 - prev.exitRatio) * denom + s.yOffset;
-                        const double yC = centerY + (0.5 - ratio)          * denom + s.yOffset;
-                        poly.append(QPointF(xP, yP));
-                        poly.append(QPointF(xC, yC));
+                        poly.append(QPointF(xP, ratioToY(prev.exitRatio)));
+                        poly.append(QPointF(xC, ratioToY(ratio)));
                     }
                     emitPixel(cur);
                 }
@@ -357,10 +369,8 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
             if (prev.used) {
                 const double xP = cLeft + prev.px + 0.5;
                 const double xC = cLeft + cur.px  + 0.5;
-                const double yP = centerY + (0.5 - prev.exitRatio) * denom + s.yOffset;
-                const double yC = centerY + (0.5 - cur.enterRatio) * denom + s.yOffset;
-                poly.append(QPointF(xP, yP));
-                poly.append(QPointF(xC, yC));
+                poly.append(QPointF(xP, ratioToY(prev.exitRatio)));
+                poly.append(QPointF(xC, ratioToY(cur.enterRatio)));
             }
             emitPixel(cur);
         }
@@ -379,8 +389,6 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     }
 
     // Cursor marker — a warm accent colour that stands out on any background.
-    // Intentionally not taken from QPalette: semantic indicators must not
-    // change appearance when the colour scheme is switched.
     if (cursor >= 0 && cursor < dataSize) {
         const double cx = cell.left() + cursor * static_cast<double>(pps);
         if (cx >= cLeft && cx <= cRight) {

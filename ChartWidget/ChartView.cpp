@@ -22,26 +22,6 @@
 
 namespace {
 
-// --- Y-scale clamping --------------------------------------------------------
-//
-//  kMinYScale is re-declared here for clarity; its canonical definition is
-//  ChartModel::kMinYScale.  All scale clamping in this file must use the
-//  same pair of bounds — previously fitYToVisible() and doAutoFitY() used
-//  qMax(0.1f, …) which was inconsistent with every other call site.
-
-/// Minimum allowed yScale — must equal ChartModel::kMinYScale.
-constexpr float kMinYScale = ChartModel::kMinYScale;
-
-/// Maximum allowed yScale (extreme zoom-in).  Shared by syncScale,
-/// overlayOnto, wheelEvent and keyPressEvent.
-constexpr float kMaxYScale = 1000.0f;
-
-// --- Y-offset clamping -------------------------------------------------------
-
-/// Absolute pixel limit for yOffset computed during fitYToVisible / doAutoFitY.
-/// Prevents integer overflow when the visible range is far outside the series bounds.
-constexpr double kMaxYOffset = 1.0e7;
-
 // --- Wheel / key zoom step factors -------------------------------------------
 
 /// Row-height step for Ctrl+Shift+Wheel.
@@ -50,8 +30,8 @@ constexpr float kWheelRowHeightStep = 1.15f;
 /// X-zoom (pps) step for Ctrl+Wheel.
 constexpr float kWheelXZoomStep = 1.15f;
 
-/// Y-scale step for Shift+Wheel.
-constexpr float kWheelYScaleStep = 1.2f;
+/// Y-zoom step for Shift+Wheel (narrows/widens the visible value range).
+constexpr float kWheelYZoomStep = 1.2f;
 
 /// Row-height step for Key_Up / Key_Down.
 constexpr float kKeyRowHeightStep = 1.2f;
@@ -84,18 +64,6 @@ constexpr double kGridStep5x          = 5.0;
 constexpr int kGridLabelFontPt = 9;
 
 // --- paintEvent clip ---------------------------------------------------------
-
-/// Half-height of the large vertical clip rect used in paintEvent.
-/// Large enough to accommodate any yOffset; must exceed the tallest possible row.
-constexpr int kPaintClipHalfH = 32768;
-
-// --- overlayOnto initial bounds sentinels ------------------------------------
-
-/// Initial globalLo sentinel (larger than any realistic double value).
-constexpr double kOverlayInitLo =  1.0e300;
-
-/// Initial globalHi sentinel (smaller than any realistic double value).
-constexpr double kOverlayInitHi = -1.0e300;
 
 } // anonymous namespace
 
@@ -223,22 +191,7 @@ void ChartView::fitYToVisible()
         const auto vr = visibleRangeForRow(r);
         if (!vr.valid) continue;
 
-        const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
-        const double visibleRange = vr.hi - vr.lo;
-        if (globalRange <= 0 || visibleRange <= 0) continue;
-
-        const float newScale = qBound(kMinYScale,
-                                      static_cast<float>(globalRange / visibleRange),
-                                      kMaxYScale);
-
-        const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
-        const double midVis    = (vr.lo + vr.hi) * 0.5;
-        const int    rowH      = s->rowHeight - kChartVPad;
-        const double rawOffset = (midVis - midGlobal) / globalRange * rowH * newScale;
-        const int    newOffset = static_cast<int>(qBound(-kMaxYOffset, rawOffset, kMaxYOffset));
-
-        m_chartModel->setSeriesYScale(s->name, newScale);
-        m_chartModel->setSeriesYOffset(s->name, newOffset);
+        m_chartModel->setSeriesViewRange(s->name, vr.lo, vr.hi);
     }
 }
 
@@ -260,19 +213,7 @@ void ChartView::doAutoFitY()
         if (!s) continue;
         const auto vr = visibleRangeForRow(r);
         if (!vr.valid) continue;
-        const double globalRange  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
-        const double visibleRange = vr.hi - vr.lo;
-        if (globalRange <= 0 || visibleRange <= 0) continue;
-        const float  newScale  = qBound(kMinYScale,
-                                      static_cast<float>(globalRange / visibleRange),
-                                      kMaxYScale);
-        const double midGlobal = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
-        const double midVis    = (vr.lo + vr.hi) * 0.5;
-        const int    rowH      = s->rowHeight - kChartVPad;
-        const double rawOffset = (midVis - midGlobal) / globalRange * rowH * newScale;
-        const int    newOffset = static_cast<int>(qBound(-kMaxYOffset, rawOffset, kMaxYOffset));
-        m_chartModel->setSeriesYScale(s->name, newScale);
-        m_chartModel->setSeriesYOffset(s->name, newOffset);
+        m_chartModel->setSeriesViewRange(s->name, vr.lo, vr.hi);
     }
 }
 
@@ -337,38 +278,27 @@ int ChartView::computeGridLabelWidth() const
         const int          rowH = s ? s->rowHeight : m_chartModel->rowHeight();
 
         if (rowY + rowH > vscroll && rowY < vscroll + vpH && s) {
-            const double loD = boundsToDouble(s->minVal);
-            const double hiD = boundsToDouble(s->maxVal);
+            const auto [loD, hiD] = effectiveViewBounds(*s);
 
             if (loD < hiD && std::isfinite(loD) && std::isfinite(hiD)) {
-                const int    chartH  = rowH - kChartVPad;
-                const double centerY = rowY + rowH * 0.5;
-                const double denom   = chartH * static_cast<double>(s->yScale);
-                const double span    = hiD - loD;
+                // The visible range is exactly [loD, hiD].
+                const double visLo = loD, visHi = hiD;
 
-                auto valAtY = [&](double y) {
-                    return loD + (0.5 - (y - centerY - s->yOffset) / denom) * span;
-                };
-                const double visHi = valAtY(static_cast<double>(rowY));
-                const double visLo = valAtY(static_cast<double>(rowY + rowH));
+                const double rawStep = (visHi - visLo) / kGridTargetDivisions;
+                if (rawStep > 0 && std::isfinite(rawStep)) {
+                    const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
+                    double step = mag;
+                    if      (rawStep / mag >= kGridStep5x) step = kGridStep5x * mag;
+                    else if (rawStep / mag >= kGridStep2x) step = kGridStep2x * mag;
 
-                if (visHi > visLo) {
-                    const double rawStep = (visHi - visLo) / kGridTargetDivisions;
-                    if (rawStep > 0 && std::isfinite(rawStep)) {
-                        const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
-                        double step = mag;
-                        if      (rawStep / mag >= kGridStep5x) step = kGridStep5x * mag;
-                        else if (rawStep / mag >= kGridStep2x) step = kGridStep2x * mag;
-
-                        for (double v = std::ceil(visLo / step) * step;
-                             v <= visHi + step * 0.5; v += step) {
-                            QString label;
-                            if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
-                                label = QString::number(v, 'e', 2);
-                            else
-                                label = QString::number(v, 'g', 4);
-                            maxW = qMax(maxW, fm.horizontalAdvance(label));
-                        }
+                    for (double v = std::ceil(visLo / step) * step;
+                         v <= visHi + step * 0.5; v += step) {
+                        QString label;
+                        if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
+                            label = QString::number(v, 'e', 2);
+                        else
+                            label = QString::number(v, 'g', 4);
+                        maxW = qMax(maxW, fm.horizontalAdvance(label));
                     }
                 }
             }
@@ -439,7 +369,9 @@ void ChartView::paintEvent(QPaintEvent *event)
 
     // Translate to content coordinates so row Y values are independent of scroll.
     p.translate(-hscroll, -vscroll);
-    p.setClipRect(hscroll, -kPaintClipHalfH, vpW, kPaintClipHalfH * 2);
+    // Clip to the actual visible content rectangle. There is no yOffset any
+    // more, so polylines never intentionally extend beyond row boundaries.
+    p.setClipRect(hscroll, vscroll, vpW, vpH);
 
     const int clipXLeft  = hscroll;
     const int clipXRight = hscroll + vpW;
@@ -455,17 +387,11 @@ void ChartView::paintEvent(QPaintEvent *event)
 
         if (rowY > visBottom + rowH) break;
 
-        if (s && rowY + rowH > visTop) {
-            // Extend the vertical clip by yOffset so out-of-bounds polylines are visible.
-            const int yOff   = s->yOffset;
-            const int top    = rowY + qMin(0, yOff) - rowH;
-            const int bottom = rowY + rowH + qMax(0, yOff) + rowH;
-            if (bottom >= visTop && top <= visBottom) {
-                const QRect cell(0, rowY, m_chartModel->chartPixelWidth(), rowH);
-                p.save();
-                m_delegate->paintData(&p, cell, *s, cursor, pps, clipXLeft, clipXRight);
-                p.restore();
-            }
+        if (s && rowY + rowH > visTop && rowY < visBottom) {
+            const QRect cell(0, rowY, m_chartModel->chartPixelWidth(), rowH);
+            p.save();
+            m_delegate->paintData(&p, cell, *s, cursor, pps, clipXLeft, clipXRight);
+            p.restore();
         }
         rowY += rowH;
     }
@@ -490,15 +416,20 @@ void ChartView::mousePressEvent(QMouseEvent *e)
     }
 
     if (e->button() == Qt::LeftButton) {
-        // Start vertical Y-offset drag on the row under the cursor.
+        // Start vertical Y-pan drag on the row under the cursor.
+        // We capture the current effective view bounds in value space so that
+        // drag-move can shift them by the correct value delta.
         const int row = viewYToRow(e->pos().y());
         if (row >= 0) {
             const ChartSeries *s = m_chartModel->series(row);
             if (s) {
-                m_dragging        = true;
-                m_dragStartY      = e->pos().y();
-                m_dragStartOffset = s->yOffset;
-                m_dragSeriesName  = s->name;
+                const auto [lo, hi] = effectiveViewBounds(*s);
+                m_dragging          = true;
+                m_dragStartY        = e->pos().y();
+                m_dragStartViewLo   = lo;
+                m_dragStartViewHi   = hi;
+                m_dragRowHeight     = s->rowHeight;
+                m_dragSeriesName    = s->name;
                 setCursor(Qt::SizeVerCursor);
             }
         }
@@ -518,9 +449,19 @@ void ChartView::mouseMoveEvent(QMouseEvent *e)
     }
 
     if (m_dragging && (e->buttons() & Qt::LeftButton)) {
-        const int delta  = e->pos().y() - m_dragStartY;
-        const int newOff = m_dragStartOffset + delta;
-        m_chartModel->setSeriesYOffset(m_dragSeriesName, newOff);
+        // Convert pixel delta → value delta and shift both view bounds.
+        // drag DOWN (positive delta): the graph shifts down visually,
+        // meaning the window now shows higher values → both bounds increase.
+        const int    delta   = e->pos().y() - m_dragStartY;
+        const double chartH  = m_dragRowHeight - kChartVPad;
+        if (chartH > 0) {
+            const double span          = m_dragStartViewHi - m_dragStartViewLo;
+            const double valuePerPixel = span / chartH;
+            const double valueDelta    = delta * valuePerPixel; // positive drag → higher values
+            m_chartModel->setSeriesViewRange(m_dragSeriesName,
+                                             m_dragStartViewLo + valueDelta,
+                                             m_dragStartViewHi + valueDelta);
+        }
         e->accept();
         return;
     }
@@ -600,15 +541,39 @@ void ChartView::wheelEvent(QWheelEvent *e)
     }
 
     if (shiftHeld) {
-        // Shift+Wheel: zoom the Y scale of the row under the cursor.
+        // Shift+Wheel: zoom the Y range of the row under the cursor.
+        // The value under the mouse pointer stays fixed; we shrink/widen
+        // [viewLo, viewHi] symmetrically around it.
         const int row = viewYToRow(e->position().toPoint().y());
         if (row >= 0) {
             const ChartSeries *s = m_chartModel->series(row);
             if (s) {
-                const float factor   = (delta > 0) ? kWheelYScaleStep : (1.0f / kWheelYScaleStep);
-                const float newScale = qBound(kMinYScale, s->yScale * factor, kMaxYScale);
-                m_chartModel->setSeriesYScale(s->name, newScale);
-                if (m_autoFitY) setAutoFitY(false);
+                const auto [lo, hi] = effectiveViewBounds(*s);
+                if (hi > lo) {
+                    const float  factor = (delta > 0) ? (1.0f / kWheelYZoomStep)
+                                                       : kWheelYZoomStep;
+
+                    // Find the value at the mouse Y position so we can keep it
+                    // pinned (zoom around the pointer, not the centre).
+                    const int    rowTop    = verticalScrollBar()->value();
+                    const QModelIndex idx  = indexAt(QPoint(0, e->position().toPoint().y()));
+                    const int    rowY      = idx.isValid()
+                                                ? rowViewportPosition(idx.row()) : 0;
+                    const double chartH    = s->rowHeight - kChartVPad;
+                    const double chartTopY = rowY + kChartVPad * 0.5;
+                    const double mouseY    = e->position().toPoint().y();
+                    const double relY      = mouseY - chartTopY;
+                    // ratio: 0 at top (hi), 1 at bottom (lo) — flipped
+                    const double pivotRatio = (chartH > 0) ? (relY / chartH) : 0.5;
+                    const double pivot      = hi - pivotRatio * (hi - lo);
+
+                    const double newHalfLo = (pivot - lo) * factor;
+                    const double newHalfHi = (hi - pivot) * factor;
+                    m_chartModel->setSeriesViewRange(s->name,
+                                                     pivot - newHalfLo,
+                                                     pivot + newHalfHi);
+                    if (m_autoFitY) setAutoFitY(false);
+                }
             }
         }
         e->accept();
@@ -744,47 +709,32 @@ void ChartView::flushPendingAppend()
 //  Scale / overlay helpers
 // =============================================================================
 
-static int rowTopY(ChartModel *model, int row)
-{
-    int y = 0;
-    for (int i = 0; i < row; ++i) {
-        const ChartSeries *s = model->series(i);
-        y += s ? s->rowHeight : model->rowHeight();
-    }
-    return y;
-}
-
-static double rowCenterY(ChartModel *model, int row)
-{
-    const int          top = rowTopY(model, row);
-    const ChartSeries *s   = model->series(row);
-    const int          rh  = s ? s->rowHeight : model->rowHeight();
-    return top + rh * 0.5;
-}
-
 void ChartView::syncScale(int sourceRow, const QSet<int> &rows)
 {
     if (!m_chartModel) return;
     const ChartSeries *src = m_chartModel->series(sourceRow);
     if (!src) return;
 
-    const double srcRange  = boundsToDouble(src->maxVal) - boundsToDouble(src->minVal);
-    const int    srcChartH = src->rowHeight - kChartVPad;
-    if (srcRange <= 0 || srcChartH <= 0) return;
+    const auto [srcLo, srcHi] = effectiveViewBounds(*src);
+    const int srcChartH = src->rowHeight - kChartVPad;
+    if (srcHi <= srcLo || srcChartH <= 0) return;
 
-    const double unitsPerPixel = srcRange / (srcChartH * static_cast<double>(src->yScale));
+    // Units per pixel of the source row.
+    const double unitsPerPixel = (srcHi - srcLo) / srcChartH;
 
     for (int r : rows) {
         if (r == sourceRow) continue;
         const ChartSeries *s = m_chartModel->series(r);
         if (!s) continue;
-        const double range  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
-        const int    chartH = s->rowHeight - kChartVPad;
-        if (range <= 0 || chartH <= 0) continue;
-        const float newScale = qBound(kMinYScale,
-                                      static_cast<float>(range / (chartH * unitsPerPixel)),
-                                      kMaxYScale);
-        m_chartModel->setSeriesYScale(s->name, newScale);
+        const auto [lo, hi] = effectiveViewBounds(*s);
+        const int chartH = s->rowHeight - kChartVPad;
+        if (chartH <= 0) continue;
+        // Preserve the current centre, apply the source's units-per-pixel.
+        const double mid      = (lo + hi) * 0.5;
+        const double newRange = unitsPerPixel * chartH;
+        m_chartModel->setSeriesViewRange(s->name,
+                                         mid - newRange * 0.5,
+                                         mid + newRange * 0.5);
     }
 }
 
@@ -792,57 +742,23 @@ void ChartView::overlayOnto(int sourceRow, const QSet<int> &rows)
 {
     if (!m_chartModel) return;
 
-    double globalLo = kOverlayInitLo, globalHi = kOverlayInitHi;
+    // Compute the combined value range of all selected rows.
+    double globalLo =  1.0e300, globalHi = -1.0e300;
     for (int r : rows) {
         const ChartSeries *s = m_chartModel->series(r);
         if (!s) continue;
-        globalLo = qMin(globalLo, boundsToDouble(s->minVal));
-        globalHi = qMax(globalHi, boundsToDouble(s->maxVal));
+        const auto [lo, hi] = effectiveViewBounds(*s);
+        if (hi > lo) {
+            globalLo = qMin(globalLo, lo);
+            globalHi = qMax(globalHi, hi);
+        }
     }
     if (globalHi <= globalLo) return;
 
-    const double combinedRange = globalHi - globalLo;
-    const double globalMid     = (globalLo + globalHi) * 0.5;
-
-    const ChartSeries *srcS = m_chartModel->series(sourceRow);
-    if (!srcS) return;
-    const int srcChartH = srcS->rowHeight - kChartVPad;
-    if (srcChartH <= 0) return;
-
-    constexpr double fillFactor = 0.85;
-    const double K = srcChartH * fillFactor / combinedRange;
-
-    const double srcCenterY = rowCenterY(m_chartModel, sourceRow);
-
     for (int r : rows) {
         const ChartSeries *s = m_chartModel->series(r);
         if (!s) continue;
-        const double range  = boundsToDouble(s->maxVal) - boundsToDouble(s->minVal);
-        const int    chartH = s->rowHeight - kChartVPad;
-        if (range <= 0 || chartH <= 0) continue;
-        const float  newScale  = qBound(kMinYScale,
-                                      static_cast<float>(K * range / chartH),
-                                      kMaxYScale);
-        const double sCenterY  = rowCenterY(m_chartModel, r);
-        const double mid       = (boundsToDouble(s->minVal) + boundsToDouble(s->maxVal)) * 0.5;
-        const int    newOffset = static_cast<int>(K * (globalMid - mid) + (srcCenterY - sCenterY));
-        m_chartModel->setSeriesYScale(s->name, newScale);
-        m_chartModel->setSeriesYOffset(s->name, newOffset);
-    }
-
-    // Apply the same transform to the source row itself.
-    {
-        const double range  = boundsToDouble(srcS->maxVal) - boundsToDouble(srcS->minVal);
-        const int    chartH = srcChartH;
-        if (range > 0 && chartH > 0) {
-            const float  newScale  = qBound(kMinYScale,
-                                          static_cast<float>(K * range / chartH),
-                                          kMaxYScale);
-            const double mid       = (boundsToDouble(srcS->minVal) + boundsToDouble(srcS->maxVal)) * 0.5;
-            const int    newOffset = static_cast<int>(K * (globalMid - mid));
-            m_chartModel->setSeriesYScale(srcS->name, newScale);
-            m_chartModel->setSeriesYOffset(srcS->name, newOffset);
-        }
+        m_chartModel->setSeriesViewRange(s->name, globalLo, globalHi);
     }
 }
 
@@ -852,7 +768,6 @@ void ChartView::resetSelected(const QSet<int> &rows)
     for (int r : rows) {
         const ChartSeries *s = m_chartModel->series(r);
         if (!s) continue;
-        m_chartModel->setSeriesYScale(s->name, 1.0f);
-        m_chartModel->setSeriesYOffset(s->name, 0);
+        m_chartModel->resetSeriesView(s->name);
     }
 }

@@ -21,7 +21,7 @@
  *    dots and the cursor marker via ChartDelegate::paintData().
  *
  * Interaction:
- *  - Left-drag: pan the series vertically (yOffset).
+ *  - Left-drag: pan the series vertically (shifts viewLo/viewHi in value space).
  *  - Right-drag: pan the chart horizontally.
  *  - Ctrl+Wheel: zoom X (pixels per sample).
  *  - Shift+Wheel: zoom Y scale of the row under the cursor.
@@ -87,7 +87,7 @@ public slots:
     /** @brief Overlays @p rows visually on top of @p sourceRow. */
     void overlayOnto(int sourceRow, const QSet<int> &rows);
 
-    /** @brief Resets yScale and yOffset for all rows in @p rows. */
+    /** @brief Resets viewLo/viewHi to auto-mode for all rows in @p rows. */
     void resetSelected(const QSet<int> &rows);
 
 protected:
@@ -166,9 +166,11 @@ private:
     int  m_pendingNewSamples  = 0;
 
     // --- Left-button Y-drag state --------------------------------------------
-    bool    m_dragging        = false;
-    int     m_dragStartY      = 0;
-    int     m_dragStartOffset = 0;
+    bool    m_dragging          = false;
+    int     m_dragStartY        = 0;
+    double  m_dragStartViewLo   = 0.0; ///< viewLo at drag start (value space)
+    double  m_dragStartViewHi   = 0.0; ///< viewHi at drag start (value space)
+    int     m_dragRowHeight     = 0;   ///< rowHeight of the dragged series
     QString m_dragSeriesName;
 
     // --- Right-button horizontal pan state -----------------------------------

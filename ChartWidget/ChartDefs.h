@@ -251,11 +251,23 @@ struct ChartSeries {
     BoundsValue  maxVal   = double(-DBL_MAX);  ///< Running maximum, updated on each append
 
     // --- Display parameters --------------------------------------------------
-    int   rowHeight    = 90;         ///< Current row height in pixels
-    int   minRowHeight = 0;          ///< Minimum resize limit (0 = unrestricted)
-    int   maxRowHeight = INT_MAX;    ///< Maximum resize limit (INT_MAX = unrestricted)
-    float yScale       = 1.0f;       ///< Vertical zoom factor (1.0 = fit to bounds)
-    int   yOffset      = 0;          ///< Vertical pan offset in pixels
+    int    rowHeight    = 90;       ///< Current row height in pixels
+    int    minRowHeight = 0;        ///< Minimum resize limit (0 = unrestricted)
+    int    maxRowHeight = INT_MAX;  ///< Maximum resize limit (INT_MAX = unrestricted)
+
+    /**
+     * @brief Explicit Y-axis lower bound used for rendering.
+     *
+     * When both viewLo and viewHi are valid (not NaN, viewHi > viewLo),
+     * rendering uses these bounds and ignores the running minVal/maxVal.
+     * This means incoming data cannot shift or rescale the chart.
+     *
+     * Set to qQNaN() (auto mode) to always show the full data range.
+     * Auto mode is the default; it is restored by resetAllDisplayParams()
+     * and by resetSeriesView().
+     */
+    double viewLo = qQNaN(); ///< Y axis lower bound; NaN = auto (show full data range)
+    double viewHi = qQNaN(); ///< Y axis upper bound; NaN = auto
 };
 
 // =============================================================================
@@ -264,5 +276,26 @@ struct ChartSeries {
 
 Q_DECLARE_METATYPE(SeriesBatch)
 Q_DECLARE_METATYPE(QList<SeriesBatch>)
+
+// =============================================================================
+//  effectiveViewBounds — resolves the Y axis range used for rendering
+// =============================================================================
+
+/**
+ * @brief Returns the {lo, hi} value-space bounds used for rendering @p s.
+ *
+ * If viewLo and viewHi are both finite and viewHi > viewLo, they are
+ * returned as-is (the user has explicitly set the Y range).  Otherwise
+ * the function falls back to the running minVal/maxVal bounds.
+ *
+ * Use this everywhere a Y axis range is needed — in the delegate (paint),
+ * in ChartView (zoom, pan, fit) and in computeGridLabelWidth().
+ */
+inline std::pair<double,double> effectiveViewBounds(const ChartSeries &s)
+{
+    if (!qIsNaN(s.viewLo) && !qIsNaN(s.viewHi) && s.viewHi > s.viewLo)
+        return {s.viewLo, s.viewHi};
+    return {boundsToDouble(s.minVal), boundsToDouble(s.maxVal)};
+}
 
 #endif // CHARTDEFS_H

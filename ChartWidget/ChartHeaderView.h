@@ -18,7 +18,7 @@
  *  - a colour bar identifying the series,
  *  - the series name and sample type,
  *  - the current value at the cursor sample,
- *  - the ×scale annotation when yScale != 1.
+ *  - the view range annotation when Y bounds are explicitly set.
  *
  * Interactive features:
  *  - Row height resize (drag the bottom grip of any section).

@@ -68,7 +68,7 @@ public:
     // -------------------------------------------------------------------------
     //  Per-series display-parameter limits
     // -------------------------------------------------------------------------
-    static constexpr float kMinYScale = 0.005f; ///< Minimum allowed yScale (extreme zoom-out)
+    // (No per-series scale limits needed: view bounds are in value space.)
 
     // -------------------------------------------------------------------------
     //  Zoom step factors (multiplicative)
@@ -180,13 +180,27 @@ public:
     /** @brief Overrides the row height for a single series. */
     void setSeriesRowHeight(const QString &name, int px);
 
-    /** @brief Sets the vertical zoom factor for a single series. Clamped to [kMinYScale, ∞). */
-    void setSeriesYScale(const QString &name, float scale);
+    /**
+     * @brief Sets the explicit Y-axis view bounds for a single series.
+     *
+     * After this call, rendering uses [lo, hi] directly and is unaffected
+     * by new data arriving (minVal/maxVal continue to update but do not
+     * move the view).  Pass lo >= hi to reset to auto mode.
+     *
+     * @param lo  Lower Y bound (value at the bottom of the chart area).
+     * @param hi  Upper Y bound (value at the top of the chart area).
+     */
+    void setSeriesViewRange(const QString &name, double lo, double hi);
 
-    /** @brief Sets the vertical pan offset in pixels for a single series. */
-    void setSeriesYOffset(const QString &name, int px);
+    /**
+     * @brief Resets viewLo/viewHi to NaN (auto mode) for the named series.
+     *
+     * In auto mode the view always spans the full running data range
+     * [minVal, maxVal], which updates as new samples arrive.
+     */
+    void resetSeriesView(const QString &name);
 
-    /** @brief Resets yScale=1.0 and yOffset=0 for all series. */
+    /** @brief Resets viewLo/viewHi to NaN for all series (auto mode). */
     void resetAllDisplayParams();
 
     /** @brief Moves the cursor to @p sampleIndex (-1 = no cursor). */
@@ -234,7 +248,7 @@ signals:
     void dataAppended(const QString &name, int row, int total);
 
     /**
-     * @brief Emitted when yScale or yOffset of a series changes.
+     * @brief Emitted when the view range (viewLo/viewHi) of a series changes.
      * @param name  Series name.
      * @param row   Row index.
      */
