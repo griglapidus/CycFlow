@@ -113,6 +113,7 @@ void ChartHeaderView::mousePressEvent(QMouseEvent *e)
             }
             m_lastClickedRow = row;
             viewport()->update();
+            emit selectionChanged(m_selectedRows);
         }
     }
     e->accept();

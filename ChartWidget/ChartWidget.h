@@ -113,6 +113,9 @@ private:
     QLabel   *m_tsLabel    = nullptr;
     QLabel   *m_hintsLabel = nullptr;
 
+    QAction  *m_actYsIn  = nullptr; ///< "Zoom Y scale in" for selected rows
+    QAction  *m_actYsOut = nullptr; ///< "Zoom Y scale out" for selected rows
+
     /** @brief Explicit theme override; std::nullopt = auto-detect from OS. */
     std::optional<ChartTheme::Variant> m_themeOverride;
 

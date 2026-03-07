@@ -90,6 +90,24 @@ public slots:
     /** @brief Resets viewLo/viewHi to auto-mode for all rows in @p rows. */
     void resetSelected(const QSet<int> &rows);
 
+    /**
+     * @brief Zooms in the Y value range of each row in @p rows.
+     *
+     * Shrinks the visible [viewLo, viewHi] range by kZoomYStep around the
+     * current midpoint.  If a row is in auto mode (NaN bounds) the running
+     * data bounds are used as the starting range.  Disables Auto Y.
+     */
+    void zoomYScaleIn(const QSet<int> &rows);
+
+    /**
+     * @brief Zooms out the Y value range of each row in @p rows.
+     *
+     * Expands the visible [viewLo, viewHi] range by kZoomYStep around the
+     * current midpoint.  If a row is in auto mode (NaN bounds) the running
+     * data bounds are used as the starting range.  Disables Auto Y.
+     */
+    void zoomYScaleOut(const QSet<int> &rows);
+
 protected:
     /// @brief Two-pass paint: base class draws backgrounds, then custom loop draws data.
     void paintEvent(QPaintEvent *e) override;

@@ -108,6 +108,10 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
                                 "    border-radius: %1px;"
                                 "    font: %2pt 'Consolas';"
                                 "}"
+                                "QToolButton:hover    { border-color: palette(highlight); }"
+                                "QToolButton:pressed  { background: palette(dark);"
+                                "                       border-color: palette(shadow);"
+                                "                       padding-top: 1px; padding-left: 1px; }"
                                 "QToolButton:checked  { background: palette(highlight); }"
                                 "QToolButton:disabled { color: palette(mid); }")
                                 .arg(kToolbarBorderRadius)
@@ -120,9 +124,9 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->setStyleSheet(tbStyle);
 
     auto *actXIn  = new QAction("X +", m_tb);
-    actXIn->setProperty("iconName", "H_H_Out.svg");
+    actXIn->setProperty("iconName", "X_Out.svg");
     auto *actXOut = new QAction("X \xe2\x88\x92", m_tb);
-    actXOut->setProperty("iconName", "H_H_In.svg");
+    actXOut->setProperty("iconName", "X_In.svg");
     connect(actXIn,  &QAction::triggered, m_model, &ChartModel::zoomXIn);
     connect(actXOut, &QAction::triggered, m_model, &ChartModel::zoomXOut);
     m_tb->addAction(actXIn);
@@ -130,17 +134,42 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actYIn  = new QAction("Y +", m_tb);
-    actYIn->setProperty("iconName", "H_V_Out.svg");
+    actYIn->setProperty("iconName", "Y_Out.svg");
     auto *actYOut = new QAction("Y \xe2\x88\x92", m_tb);
-    actYOut->setProperty("iconName", "H_V_In.svg");
+    actYOut->setProperty("iconName", "Y_In.svg");
     connect(actYIn,  &QAction::triggered, m_model, &ChartModel::zoomYIn);
     connect(actYOut, &QAction::triggered, m_model, &ChartModel::zoomYOut);
     m_tb->addAction(actYIn);
     m_tb->addAction(actYOut);
     m_tb->addSeparator();
 
+    // Y-scale zoom for selected rows (viewLo/viewHi in value space).
+    m_actYsIn  = new QAction(QStringLiteral("Y\xe2\x86\x91"), m_tb);   // "Y↑"
+    m_actYsIn->setProperty("iconName", "Y_Zoom_In.svg");
+    m_actYsIn->setToolTip(tr("Zoom in Y scale of selected rows"));
+    m_actYsIn->setEnabled(false);
+    m_actYsOut = new QAction(QStringLiteral("Y\xe2\x86\x93"), m_tb);   // "Y↓"
+    m_actYsOut->setProperty("iconName", "Y_Zoom_Out.svg");
+    m_actYsOut->setToolTip(tr("Zoom out Y scale of selected rows"));
+    m_actYsOut->setEnabled(false);
+    connect(m_actYsIn,  &QAction::triggered, this, [this]() {
+        m_view->zoomYScaleIn(m_headerView->selectedRows());
+    });
+    connect(m_actYsOut, &QAction::triggered, this, [this]() {
+        m_view->zoomYScaleOut(m_headerView->selectedRows());
+    });
+    connect(m_headerView, &ChartHeaderView::selectionChanged,
+            this, [this](const QSet<int> &rows) {
+                const bool hasSelection = !rows.isEmpty();
+                m_actYsIn ->setEnabled(hasSelection);
+                m_actYsOut->setEnabled(hasSelection);
+            });
+    m_tb->addAction(m_actYsIn);
+    m_tb->addAction(m_actYsOut);
+    m_tb->addSeparator();
+
     auto *actAutoFit = new QAction("Auto Y", m_tb);
-    actAutoFit->setProperty("iconName", "H_V_Auto.svg");
+    actAutoFit->setProperty("iconName", "Auto.svg");
     actAutoFit->setCheckable(true);
     actAutoFit->setChecked(false);
     actAutoFit->setToolTip("Auto-fit Y to the visible X range");
@@ -150,7 +179,7 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addSeparator();
 
     auto *actReset = new QAction("Reset", m_tb);
-    actReset->setProperty("iconName", "H_V_Reset.svg");
+    actReset->setProperty("iconName", "Reset.svg");
     actReset->setToolTip("Reset all display parameters");
     connect(actReset, &QAction::triggered, m_model, &ChartModel::resetAllDisplayParams);
     m_tb->addAction(actReset);

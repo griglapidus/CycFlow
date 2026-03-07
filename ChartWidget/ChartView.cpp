@@ -771,3 +771,42 @@ void ChartView::resetSelected(const QSet<int> &rows)
         m_chartModel->resetSeriesView(s->name);
     }
 }
+
+// =============================================================================
+//  Y-scale zoom for selected rows
+// =============================================================================
+
+/**
+ * @brief Shared implementation for zoomYScaleIn / zoomYScaleOut.
+ *
+ * @p factor > 1 expands (zoom out), 0 < factor < 1 shrinks (zoom in).
+ * The range is scaled around the current midpoint so the centre of the
+ * chart stays fixed.
+ */
+static void applyYScaleZoom(ChartModel *model, const QSet<int> &rows, double factor)
+{
+    if (!model || rows.isEmpty()) return;
+    for (int r : rows) {
+        const ChartSeries *s = model->series(r);
+        if (!s) continue;
+        const auto [lo, hi] = effectiveViewBounds(*s);
+        if (qFuzzyCompare(lo, hi)) continue; // degenerate range – skip
+        const double mid      = (lo + hi) * 0.5;
+        const double newRange = (hi - lo) * factor;
+        model->setSeriesViewRange(s->name,
+                                  mid - newRange * 0.5,
+                                  mid + newRange * 0.5);
+    }
+}
+
+void ChartView::zoomYScaleIn(const QSet<int> &rows)
+{
+    if (m_autoFitY) setAutoFitY(false);
+    applyYScaleZoom(m_chartModel, rows, 1.0 / ChartModel::kZoomYStep);
+}
+
+void ChartView::zoomYScaleOut(const QSet<int> &rows)
+{
+    if (m_autoFitY) setAutoFitY(false);
+    applyYScaleZoom(m_chartModel, rows, ChartModel::kZoomYStep);
+}

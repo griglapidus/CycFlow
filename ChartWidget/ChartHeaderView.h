@@ -65,6 +65,12 @@ public:
     void setAutoFitY(bool on);
 
 signals:
+    /**
+     * @brief Emitted whenever the set of selected rows changes.
+     * @param rows  The new selection set (may be empty).
+     */
+    void selectionChanged(const QSet<int> &rows);
+
     /** @brief Emitted when the user requests scale synchronisation. */
     void syncScaleRequested(int sourceRow, QSet<int> rows);
 

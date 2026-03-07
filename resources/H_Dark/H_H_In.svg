@@ -1,8 +1,0 @@
-<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
-  <line x1="15.0" y1="150.0" x2="485.0" y2="150.0" stroke="#8899bb" stroke-width="30" stroke-linecap="round" />
-  <line x1="15.0" y1="350.0" x2="485.0" y2="350.0" stroke="#8899bb" stroke-width="30" stroke-linecap="round" />
-  <line x1="15.0" y1="250.0" x2="115.0" y2="250.0" stroke="#8899bb" stroke-width="30" stroke-linecap="round" />
-  <polyline points="42.18847050625473,302.90067270632255 115.0,250.0 42.18847050625473,197.09932729367742" fill="none" stroke="#8899bb" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
-  <line x1="485.0" y1="250.0" x2="385.0" y2="250.0" stroke="#8899bb" stroke-width="30" stroke-linecap="round" />
-  <polyline points="457.81152949374524,197.0993272936774 385.0,250.0 457.8115294937453,302.90067270632255" fill="none" stroke="#8899bb" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
-</svg>
