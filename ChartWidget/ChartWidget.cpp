@@ -145,11 +145,11 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
 
     // Y-scale zoom for selected rows (viewLo/viewHi in value space).
     m_actYsIn  = new QAction(QStringLiteral("Y\xe2\x86\x91"), m_tb);   // "Y↑"
-    m_actYsIn->setProperty("iconName", "Y_Zoom_In.svg");
+    m_actYsIn->setProperty("iconName", "Y_Zoom_Out.svg");
     m_actYsIn->setToolTip(tr("Zoom in Y scale of selected rows"));
     m_actYsIn->setEnabled(false);
     m_actYsOut = new QAction(QStringLiteral("Y\xe2\x86\x93"), m_tb);   // "Y↓"
-    m_actYsOut->setProperty("iconName", "Y_Zoom_Out.svg");
+    m_actYsOut->setProperty("iconName", "Y_Zoom_In.svg");
     m_actYsOut->setToolTip(tr("Zoom out Y scale of selected rows"));
     m_actYsOut->setEnabled(false);
     connect(m_actYsIn,  &QAction::triggered, this, [this]() {
