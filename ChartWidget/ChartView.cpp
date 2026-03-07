@@ -224,7 +224,7 @@ int ChartView::viewXToSample(int viewX) const
     if (dataX < 0) return -1;
     const float pps    = m_chartModel->pixelsPerSample();
     if (pps <= 0.f) return -1;
-    const int sample = static_cast<int>(dataX / pps);
+    const int sample = static_cast<int>(dataX / pps + 0.5f);
     if (sample >= m_chartModel->maxSampleCount()) return -1;
     return sample;
 }
