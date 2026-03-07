@@ -523,11 +523,14 @@ void ChartView::wheelEvent(QWheelEvent *e)
         const int   oldScroll = horizontalScrollBar()->value();
         const float oldPps    = m_chartModel->pixelsPerSample();
         const float newPps    = qBound(ChartModel::kMinPps, oldPps * factor, ChartModel::kMaxPps);
-        const int   dataX     = mouseX + oldScroll;
-        const int   newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - mouseX);
+        const double sampleUnderMouse = (static_cast<double>(oldScroll) + mouseX) / oldPps;
+        const int    newColWidth = qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps));
+        const int    newScroll   = qMax(0, static_cast<int>(std::round(sampleUnderMouse * newPps)) - mouseX);
+
         m_chartModel->setPpsQuiet(newPps);
-        horizontalHeader()->resizeSection(
-            0, qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps)));
+        horizontalHeader()->resizeSection(0, newColWidth);
+
+        horizontalScrollBar()->setRange(0, qMax(0, newColWidth - viewport()->width()));
         horizontalScrollBar()->setValue(newScroll);
         m_pendingOldSamples = m_chartModel->maxSampleCount();
         m_pendingNewSamples = m_chartModel->maxSampleCount();
