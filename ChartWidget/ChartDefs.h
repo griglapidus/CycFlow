@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
+
 #ifndef CHARTDEFS_H
 #define CHARTDEFS_H
 

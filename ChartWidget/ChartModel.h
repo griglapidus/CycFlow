@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Grigorii Lapidus
+
 #ifndef CHARTMODEL_H
 #define CHARTMODEL_H
 
