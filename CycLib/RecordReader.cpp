@@ -70,6 +70,9 @@ void RecordReader::stop() {
     if (m_running.compare_exchange_strong(expected, false)) {
         LOG_INFO << "RecordReader::stop: stopping reader"
                  << " cursor=" << m_readerCursor.load();
+        {
+            std::lock_guard<std::mutex> lock(m_mtx);
+        }
         m_cv_worker.notify_all();
         m_cv_user.notify_all();
         if (m_worker.joinable()) {
@@ -82,8 +85,11 @@ void RecordReader::stop() {
 void RecordReader::finish() {
     if (!m_running.load()) return;
 
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
     m_finishing = true;
     m_finishTarget = m_target->getTotalWritten();
+    }
 
     LOG_INFO << "RecordReader::finish: finishing at target=" << m_finishTarget
              << " currentCursor=" << m_readerCursor.load()
@@ -170,9 +176,9 @@ void RecordReader::workerLoop() {
         {
             std::unique_lock<std::mutex> lock(m_mtx);
             m_cv_worker.wait(lock, [this]() {
-                if (m_bgIsFull) return false; // Must wait for the user to consume the batch
+                if (!m_running.load()) return true; // Stop requested — must wake up even if bg is full
 
-                if (!m_running.load()) return true;
+                if (m_bgIsFull) return false; // Must wait for the user to consume the batch
 
                 if (m_finishing && m_readerCursor.load() >= m_finishTarget) return true;
 
