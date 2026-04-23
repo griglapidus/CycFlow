@@ -619,6 +619,9 @@ TEST_P(RecordPerformanceTest, FieldReadWriteThroughput) {
     const auto readMs  = std::chrono::duration_cast<std::chrono::milliseconds>(readElapsed).count();
     const uint64_t writesPerSec = writeMs > 0 ? (totalRecords * 1000ULL) / static_cast<uint64_t>(writeMs) : 0;
     const uint64_t readsPerSec  = readMs  > 0 ? (totalRecords * 1000ULL) / static_cast<uint64_t>(readMs)  : 0;
+    const uint64_t totalBytes   = totalRecords * static_cast<uint64_t>(recSize);
+    const double   writeMiBps   = writeMs > 0 ? (static_cast<double>(totalBytes) / 1048576.0) * 1000.0 / static_cast<double>(writeMs) : 0.0;
+    const double   readMiBps    = readMs  > 0 ? (static_cast<double>(totalBytes) / 1048576.0) * 1000.0 / static_cast<double>(readMs)  : 0.0;
 
     const char* mode = align ? "Aligned" : "Packed";
     std::cout << "[Perf/" << mode << "] budget: " << budget.count()
@@ -627,16 +630,160 @@ TEST_P(RecordPerformanceTest, FieldReadWriteThroughput) {
               << ", chunk: " << kChunkSize
               << ", bufferRecords: " << kRecordCount
               << ", workingSet: " << (recSize * kRecordCount) / 1024 << " KiB\n";
-    std::cout << "[Perf/" << mode << "] Total records processed: " << totalRecords << "\n";
+    std::cout << "[Perf/" << mode << "] Total records processed: " << totalRecords
+              << " (" << totalBytes / 1048576 << " MiB per side)\n";
     std::cout << "[Perf/" << mode << "] Write: " << writeMs << " ms"
               << "  (" << writesPerSec << " records/s, "
-              <<  writesPerSec * fieldsPerCycle << " field-writes/s)\n";
+              <<  writesPerSec * fieldsPerCycle << " field-writes/s, "
+              << writeMiBps << " MiB/s)\n";
     std::cout << "[Perf/" << mode << "] Read : " << readMs  << " ms"
               << "  (" << readsPerSec  << " records/s, "
-              <<  readsPerSec  * fieldsPerCycle << " field-reads/s)\n";
+              <<  readsPerSec  * fieldsPerCycle << " field-reads/s, "
+              << readMiBps << " MiB/s)\n";
     std::cout << "[Perf/" << mode << "] sink (ignore): " << sink << '\n';
 
     EXPECT_GT(totalRecords, 0u);
+}
+
+// Same per-record work as FieldReadWriteThroughput, but the write and read
+// loops run on separate threads for the full budget window. Measures how much
+// the reader manages to consume while the writer is producing concurrently.
+TEST_P(RecordPerformanceTest, ConcurrentFieldReadWriteThroughput) {
+    const bool align = GetParam();
+
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("PerfI8",  DataType::dtInt8);
+    attrs.emplace_back("PerfU8",  DataType::dtUInt8);
+    attrs.emplace_back("PerfI16", DataType::dtInt16);
+    attrs.emplace_back("PerfU32", DataType::dtInt32, 2);
+    attrs.emplace_back("PerfI32", DataType::dtUInt32);
+    attrs.emplace_back("PerfI64", DataType::dtInt64);
+    attrs.emplace_back("PerfFlt", DataType::dtFloat, 2);
+    attrs.emplace_back("PerfDbl", DataType::dtDouble, 2);
+    RecRule rule(attrs, align);
+
+    const int idI8  = PReg::getID("PerfI8");
+    const int idU8  = PReg::getID("PerfU8");
+    const int idI16 = PReg::getID("PerfI16");
+    const int idI32 = PReg::getID("PerfI32");
+    const int idU32 = PReg::getID("PerfUI32");
+    const int idI64 = PReg::getID("PerfI64");
+    const int idFlt = PReg::getID("PerfFlt");
+    const int idDbl = PReg::getID("PerfDbl");
+
+    const size_t recSize       = rule.getRecSize();
+    const size_t kRecordCount  = 128000;
+    const size_t kChunkSize    = 4000;
+    std::shared_ptr<RecBuffer> buffer = std::make_shared<RecBuffer>(rule, kRecordCount);
+
+    using clock = std::chrono::steady_clock;
+    const auto budget = std::chrono::milliseconds(1000);
+    const size_t fieldsPerCycle = attrs.size();
+
+    RecordWriter recWriter(buffer, kChunkSize);
+    RecordReader recReader(buffer, kChunkSize);
+
+    std::atomic<bool> stopFlag{false};
+    std::atomic<uint64_t> writtenRecords{0};
+    std::atomic<uint64_t> readRecords{0};
+    std::atomic<int64_t>  sinkTotal{0};
+
+    std::thread writerThread([&]() {
+        uint64_t counter = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            for (size_t i = 0; i < kChunkSize; ++i) {
+                auto rec = recWriter.nextRecord();
+                rec.setInt8 (idI8,  static_cast<int8_t >(counter));
+                rec.setInt8 (idU8,  static_cast<uint8_t >(counter));
+                rec.setInt16(idI16, static_cast<int16_t>(counter));
+                rec.setInt32(idI32, static_cast<int32_t>(counter));
+                rec.setInt32(idU32, static_cast<uint32_t>(counter), 1);
+                rec.setInt32(idU32, static_cast<uint32_t>(counter), 3);
+                rec.setInt64(idI64, static_cast<int64_t>(counter));
+                rec.setFloat(idFlt, static_cast<float  >(counter), 1);
+                rec.setFloat(idFlt, static_cast<float  >(counter), 2);
+                rec.setDouble(idDbl, static_cast<double>(counter), 1);
+                rec.setDouble(idDbl, static_cast<double>(counter), 2);
+                ++counter;
+                recWriter.commitRecord();
+            }
+        }
+        recWriter.flush();
+        writtenRecords.store(counter);
+    });
+
+    std::thread readerThread([&]() {
+        int64_t  sink = 0;
+        uint64_t readCounter = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            auto batch = recReader.nextBatch(kChunkSize, /*wait=*/false);
+            if (!batch.isValid()) {
+                std::this_thread::yield();
+                continue;
+            }
+            for (size_t i = 0; i < batch.count; ++i) {
+                Record rec(batch.rule,
+                           const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+                sink += rec.getInt8  (idI8);
+                sink += rec.getUInt8 (idU8);
+                sink += rec.getInt16 (idI16);
+                sink += rec.getInt32 (idI32);
+                sink += rec.getUInt32(idU32, 1);
+                sink += rec.getUInt32(idU32, 2);
+                sink += rec.getInt64 (idI64);
+                sink += static_cast<int64_t>(rec.getFloat (idFlt), 1);
+                sink += static_cast<int64_t>(rec.getFloat (idFlt), 2);
+                sink += static_cast<int64_t>(rec.getDouble(idDbl), 1);
+                sink += static_cast<int64_t>(rec.getDouble(idDbl), 2);
+            }
+            readCounter += batch.count;
+        }
+        readRecords.store(readCounter);
+        sinkTotal.store(sink);
+    });
+
+    const auto runStart = clock::now();
+    std::this_thread::sleep_for(budget);
+    stopFlag.store(true, std::memory_order_relaxed);
+
+    writerThread.join();
+    readerThread.join();
+    const auto elapsed = clock::now() - runStart;
+
+    const uint64_t written = writtenRecords.load();
+    const uint64_t readCnt = readRecords.load();
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    const uint64_t writesPerSec = elapsedMs > 0 ? (written * 1000ULL) / static_cast<uint64_t>(elapsedMs) : 0;
+    const uint64_t readsPerSec  = elapsedMs > 0 ? (readCnt * 1000ULL) / static_cast<uint64_t>(elapsedMs) : 0;
+    const double   readRatio    = written > 0 ? (static_cast<double>(readCnt) / static_cast<double>(written)) : 0.0;
+    const uint64_t writtenBytes = written * static_cast<uint64_t>(recSize);
+    const uint64_t readBytes    = readCnt * static_cast<uint64_t>(recSize);
+    const double   writeMiBps   = elapsedMs > 0 ? (static_cast<double>(writtenBytes) / 1048576.0) * 1000.0 / static_cast<double>(elapsedMs) : 0.0;
+    const double   readMiBps    = elapsedMs > 0 ? (static_cast<double>(readBytes)    / 1048576.0) * 1000.0 / static_cast<double>(elapsedMs) : 0.0;
+
+    const char* mode = align ? "Aligned" : "Packed";
+    std::cout << "[PerfConc/" << mode << "] budget: " << budget.count()
+              << " ms, elapsed: " << elapsedMs
+              << " ms, fields/cycle: " << fieldsPerCycle
+              << ", recSize: " << recSize << " bytes"
+              << ", chunk: " << kChunkSize
+              << ", bufferRecords: " << kRecordCount
+              << ", workingSet: " << (recSize * kRecordCount) / 1024 << " KiB\n";
+    std::cout << "[PerfConc/" << mode << "] Written: " << written
+              << " (" << writtenBytes / 1048576 << " MiB)"
+              << "  (" << writesPerSec << " records/s, "
+              << writesPerSec * fieldsPerCycle << " field-writes/s, "
+              << writeMiBps << " MiB/s)\n";
+    std::cout << "[PerfConc/" << mode << "] Read   : " << readCnt
+              << " (" << readBytes / 1048576 << " MiB)"
+              << "  (" << readsPerSec  << " records/s, "
+              << readsPerSec  * fieldsPerCycle << " field-reads/s, "
+              << readMiBps << " MiB/s)"
+              << ", read/written = " << readRatio << "\n";
+    std::cout << "[PerfConc/" << mode << "] sink (ignore): " << sinkTotal.load() << '\n';
+
+    EXPECT_GT(written, 0u);
+    EXPECT_GT(readCnt, 0u);
 }
 
 // =============================================================================
