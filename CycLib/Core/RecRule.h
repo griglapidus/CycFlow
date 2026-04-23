@@ -86,8 +86,12 @@ public:
     /**
      * @brief Gets the total memory size of a single record defined by this schema.
      * @return Total size in bytes.
+     *
+     * Inlined: this is called on every field access path
+     * (Record::clear, RecordWriter::nextRecord) and trivial-inline avoids a
+     * cross-DLL call.
      */
-    [[nodiscard]] size_t getRecSize() const;
+    [[nodiscard]] size_t getRecSize() const { return m_recSize; }
 
     /**
      * @brief Gets the byte offset of an attribute by sequential index.
@@ -101,16 +105,38 @@ public:
      * @note O(1) flat-array lookup.
      * @param id PReg ID of the attribute.
      * @return Offset in bytes, or 0 if the ID is invalid.
+     *
+     * Inlined: this is the hottest function in the library — called for every
+     * typed field access (Record::getVoid). Keeping it out-of-line in the DLL
+     * turns every field access into a dllimport trampoline call and blocks the
+     * compiler from folding adjacent getters in the user's hot loop. With the
+     * body visible, a full-chain inline (test → Record::getInt32 → getVoid →
+     * getOffsetById) collapses to a couple of loads.
      */
-    [[nodiscard]] size_t getOffsetById(int id) const;
+    [[nodiscard]] size_t getOffsetById(int id) const {
+        if (static_cast<unsigned>(id) < static_cast<unsigned>(m_offsetCache.size())) {
+            const size_t offset = m_offsetCache[id];
+            if (offset != static_cast<size_t>(-1)) return offset;
+        }
+        return 0;
+    }
 
     /**
      * @brief Gets the data type of an attribute by its PReg ID.
      * @note O(1) flat-array lookup.
      * @param id PReg ID of the attribute.
      * @return DataType, or dtVoid if invalid.
+     *
+     * Inlined for the same reason as getOffsetById — called on every generic
+     * (double-based) accessor path.
      */
-    [[nodiscard]] DataType getType(int id) const;
+    [[nodiscard]] DataType getType(int id) const {
+        if (static_cast<unsigned>(id) < static_cast<unsigned>(m_typeCache.size())) {
+            const DataType t = m_typeCache[id];
+            if (t != DataType::dtUndefine) return t;
+        }
+        return DataType::dtVoid;
+    }
 
     /**
      * @brief Returns the BitRef for a named bit by its PReg ID.

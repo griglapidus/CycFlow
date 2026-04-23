@@ -69,13 +69,13 @@ public:
     /**
      * @brief Checks if the record holds a valid (non-null) data pointer.
      */
-    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] bool isValid() const { return m_data != nullptr; }
 
     /**
      * @brief Updates the internal data pointer to a new memory block.
      * @param ptr Pointer to the new raw data.
      */
-    void setData(void* ptr);
+    void setData(void* ptr) { m_data = static_cast<uint8_t*>(ptr); }
 
     /**
      * @brief Zeroes out the entire memory block associated with this record.
@@ -86,20 +86,28 @@ public:
      * @brief Gets the total memory size required for this record.
      * @return Size in bytes.
      */
-    [[nodiscard]] size_t getSize() const;
+    [[nodiscard]] size_t getSize() const { return m_rule.getRecSize(); }
 
     /** @brief Retrieves the raw mutable data pointer. */
-    [[nodiscard]] void* data();
+    [[nodiscard]] void* data() { return m_data; }
 
     /** @brief Retrieves the raw const data pointer. */
-    [[nodiscard]] const void* data() const;
+    [[nodiscard]] const void* data() const { return m_data; }
 
     /**
      * @brief Gets a raw void pointer to the start of a named field.
      * @param id PReg ID of the attribute.
      * @return Pointer to the field, or nullptr if invalid.
+     *
+     * Inlined: this is the core of every typed accessor (DECLARE_RECORD_ACCESSORS
+     * expands to `static_cast<TYPE*>(getVoid(id))[index]`). Combined with an
+     * inline RecRule::getOffsetById, the full chain from `rec.setInt32(id, v)`
+     * collapses to a couple of loads + a store, with no cross-DLL call.
      */
-    [[nodiscard]] void* getVoid(int id) const;
+    [[nodiscard]] void* getVoid(int id) const {
+        if (!m_data) return nullptr;
+        return m_data + m_rule.getOffsetById(id);
+    }
 
     // -----------------------------------------------------------------------
     // Generic double-based accessors (work on plain fields)

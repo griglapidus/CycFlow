@@ -107,32 +107,11 @@ void RecRule::buildHeader() {
 }
 
 // ---------------------------------------------------------------------------
-size_t RecRule::getRecSize() const {
-    return m_recSize;
-}
 
 // ---------------------------------------------------------------------------
 size_t RecRule::getOffsetByIndex(size_t index) const {
     if (index >= m_attrs.size()) return 0;
     return m_attrs[index].offset;
-}
-
-// ---------------------------------------------------------------------------
-size_t RecRule::getOffsetById(int id) const {
-    if (id > 0 && id < static_cast<int>(m_offsetCache.size())) {
-        size_t offset = m_offsetCache[id];
-        if (offset != static_cast<size_t>(-1)) return offset;
-    }
-    return 0;
-}
-
-// ---------------------------------------------------------------------------
-DataType RecRule::getType(int id) const {
-    if (id > 0 && id < static_cast<int>(m_typeCache.size())) {
-        DataType t = m_typeCache[id];
-        if (t != DataType::dtUndefine) return t;
-    }
-    return DataType::dtVoid;
 }
 
 // ---------------------------------------------------------------------------
