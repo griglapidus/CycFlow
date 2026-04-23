@@ -58,6 +58,9 @@ RecordReader::~RecordReader() {
 }
 
 void RecordReader::notifyDataAvailable() {
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+    }
     m_cv_worker.notify_one();
 }
 
@@ -87,8 +90,8 @@ void RecordReader::finish() {
 
     {
         std::lock_guard<std::mutex> lock(m_mtx);
-    m_finishing = true;
-    m_finishTarget = m_target->getTotalWritten();
+        m_finishing = true;
+        m_finishTarget = m_target->getTotalWritten();
     }
 
     LOG_INFO << "RecordReader::finish: finishing at target=" << m_finishTarget

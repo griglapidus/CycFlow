@@ -3,22 +3,23 @@
 
 #include "RecRule.h"
 #include "PReg.h"
+#include <algorithm>
 #include <cstring>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
 namespace cyc {
 
 // ---------------------------------------------------------------------------
-RecRule::RecRule(const std::vector<PAttr>& inputAttrs) {
-    init(inputAttrs);
+RecRule::RecRule(const std::vector<PAttr>& inputAttrs, bool align) {
+    init(inputAttrs, align);
 }
 
 // ---------------------------------------------------------------------------
-void RecRule::init(const std::vector<PAttr>& inputAttrs) {
+void RecRule::init(const std::vector<PAttr>& inputAttrs, bool align) {
     m_attrs.clear();
     m_bitCache.clear();
+    m_aligned = align;
     size_t tempSize = 0;
 
     buildHeader();
@@ -29,11 +30,34 @@ void RecRule::init(const std::vector<PAttr>& inputAttrs) {
         m_attrs.push_back(attr);
     }
 
-    for (auto attr : inputAttrs) {
-        attr.offset = tempSize;
-        tempSize += attr.getSize();
-        m_attrs.push_back(attr);
+    if (align) {
+        std::vector<PAttr> sorted = inputAttrs;
+        std::stable_sort(sorted.begin(), sorted.end(),
+            [](const PAttr& a, const PAttr& b) {
+                return getTypeSize(a.type) > getTypeSize(b.type);
+            });
+        for (auto attr : sorted) {
+            attr.offset = tempSize;
+            tempSize += attr.getSize();
+            m_attrs.push_back(attr);
+        }
+
+        size_t maxElem = 1;
+        for (const auto& a : m_attrs) {
+            maxElem = std::max(maxElem, getTypeSize(a.type));
+        }
+        if (maxElem > 1) {
+            const size_t rem = tempSize % maxElem;
+            if (rem != 0) tempSize += (maxElem - rem);
+        }
+    } else {
+        for (auto attr : inputAttrs) {
+            attr.offset = tempSize;
+            tempSize += attr.getSize();
+            m_attrs.push_back(attr);
+        }
     }
+    m_recSize = tempSize;
 
     // -----------------------------------------------------------------------
     // Build plain-field caches (flat vectors indexed by PReg ID).
@@ -84,8 +108,7 @@ void RecRule::buildHeader() {
 
 // ---------------------------------------------------------------------------
 size_t RecRule::getRecSize() const {
-    return std::accumulate(m_attrs.begin(), m_attrs.end(), size_t(0),
-                           [](size_t sum, const PAttr& attr) { return sum + attr.getSize(); });
+    return m_recSize;
 }
 
 // ---------------------------------------------------------------------------

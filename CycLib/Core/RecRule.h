@@ -52,15 +52,31 @@ public:
 
     /**
      * @brief Constructs a rule from a provided list of attributes.
+     *
      * @param inputAttrs User-defined attributes (plain or bit-field).
+     * @param align      When @c true, enables aligned layout:
+     *                    - user fields are stably sorted by decreasing element size
+     *                      so larger (more strictly aligned) types are placed first;
+     *                    - since every supported element size is a power of two,
+     *                      this sort alone keeps every field naturally aligned and
+     *                      no internal padding is required;
+     *                    - trailing padding is appended so the total record size is
+     *                      a multiple of the *largest* element size in the record,
+     *                      which keeps the next record in a packed buffer starting
+     *                      on the same boundary.
+     *                   When @c false (default) the historical tightly-packed layout
+     *                   is used — fields keep their input order and there is no
+     *                   inter-field or trailing padding.
      */
-    explicit RecRule(const std::vector<PAttr>& inputAttrs);
+    explicit RecRule(const std::vector<PAttr>& inputAttrs, bool align = false);
 
     /**
      * @brief Initialises the rule, builds headers and all O(1) caches.
+     *
      * @param inputAttrs User-defined attributes.
+     * @param align      See RecRule constructor for semantics.
      */
-    void init(const std::vector<PAttr>& inputAttrs);
+    void init(const std::vector<PAttr>& inputAttrs, bool align = false);
 
     /**
      * @brief Builds internal system header attributes (e.g. TimeStamp).
@@ -137,6 +153,8 @@ public:
 private:
     std::vector<PAttr>     m_headerAttrs;
     std::vector<PAttr>     m_attrs;
+    size_t                 m_recSize = 0;   ///< Total record size in bytes (including alignment padding).
+    bool                   m_aligned = false; ///< True if the layout was built in aligned mode.
 
     // --- O(1) caches for plain fields (indexed by PReg ID via flat vector) ---
     std::vector<size_t>    m_offsetCache;   ///< Byte offset of the containing field.

@@ -7,6 +7,8 @@
 #include <cstring>
 #include <thread>
 #include <algorithm>
+#include <chrono>
+#include <iostream>
 
 #include "Core/PReg.h"
 #include "Core/PAttr.h"
@@ -500,4 +502,213 @@ TEST_P(AsyncIntegrationTest, WriteReadFlow) {
     for(int i = 0; i < TOTAL_RECORDS; ++i) {
         ASSERT_EQ(receivedData[i], i);
     }
+}
+
+// =============================================================================
+// Record field read/write throughput benchmark
+// =============================================================================
+
+// Parameterised over a single bool: the RecRule alignment flag. Runs once with
+// the historical packed layout and once with the aligned layout so the two
+// numbers can be compared directly.
+class RecordPerformanceTest : public ::testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    AlignModes,
+    RecordPerformanceTest,
+    ::testing::Values(false, true),
+    [](const ::testing::TestParamInfo<bool>& info) {
+        return info.param ? "Aligned" : "Packed";
+    });
+
+// Alternates 1000-record write chunks with 1000-record read chunks within a
+// fixed time budget, accumulating write and read times separately. One "cycle"
+// writes (or reads) every field of the record once. Results are printed to
+// stdout so the tester can gauge throughput.
+TEST_P(RecordPerformanceTest, FieldReadWriteThroughput) {
+    const bool align = GetParam();
+
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("PerfI8",  DataType::dtInt8);
+    attrs.emplace_back("PerfU8",  DataType::dtUInt8);
+    attrs.emplace_back("PerfI16", DataType::dtInt16);
+    attrs.emplace_back("PerfU32", DataType::dtInt32, 2);
+    attrs.emplace_back("PerfI32", DataType::dtUInt32);
+    attrs.emplace_back("PerfI64", DataType::dtInt64);
+    attrs.emplace_back("PerfFlt", DataType::dtFloat, 2);
+    attrs.emplace_back("PerfDbl", DataType::dtDouble, 2);
+    RecRule rule(attrs, align);
+
+    const int idI8  = PReg::getID("PerfI8");
+    const int idU8  = PReg::getID("PerfU8");
+    const int idI16 = PReg::getID("PerfI16");
+    const int idI32 = PReg::getID("PerfI32");
+    const int idU32 = PReg::getID("PerfUI32");
+    const int idI64 = PReg::getID("PerfI64");
+    const int idFlt = PReg::getID("PerfFlt");
+    const int idDbl = PReg::getID("PerfDbl");
+
+    // Back the benchmark with a buffer of many records so each cycle touches a
+    // different memory slot. This forces real memory traffic and is what makes
+    // the packed-vs-aligned comparison meaningful — iterating a single record
+    // would just keep one cache line hot and hide layout effects.
+    const size_t recSize       = rule.getRecSize();
+    const size_t kRecordCount  = 128000;   // ~280-320 KB — overflows L1, fits L2
+    const size_t kChunkSize    = 4000;
+    std::shared_ptr<RecBuffer> buffer = std::make_shared<RecBuffer>(rule, kRecordCount);
+
+    using clock = std::chrono::steady_clock;
+    const auto budget = std::chrono::milliseconds(1000);
+    const size_t fieldsPerCycle = attrs.size();
+
+    RecordWriter recWriter(buffer, kChunkSize);
+    RecordReader recReader(buffer, kChunkSize);
+
+    volatile int64_t sink = 0;                 // defeats dead-store elimination
+    uint64_t totalRecords = 0;
+    clock::duration writeElapsed{0};
+    clock::duration readElapsed{0};
+    uint64_t counter = 0;
+
+    const auto loopStart = clock::now();
+    const auto loopDeadline = loopStart + budget;
+    while (clock::now() < loopDeadline) {
+        // --- Write 1000 records ---
+        const auto writeBegin = clock::now();
+        for (size_t i = 0; i < kChunkSize; ++i) {
+            auto rec = recWriter.nextRecord();
+            rec.setInt8 (idI8,  static_cast<int8_t >(counter));
+            rec.setInt8 (idU8,  static_cast<uint8_t >(counter));
+            rec.setInt16(idI16, static_cast<int16_t>(counter));
+            rec.setInt32(idI32, static_cast<int32_t>(counter));
+            rec.setInt32(idU32, static_cast<uint32_t>(counter), 1);
+            rec.setInt32(idU32, static_cast<uint32_t>(counter), 3);
+            rec.setInt64(idI64, static_cast<int64_t>(counter));
+            rec.setFloat(idFlt, static_cast<float  >(counter), 1);
+            rec.setFloat(idFlt, static_cast<float  >(counter), 2);
+            rec.setDouble(idDbl, static_cast<double>(counter), 1);
+            rec.setDouble(idDbl, static_cast<double>(counter), 2);
+            ++counter;
+            recWriter.commitRecord();
+        }
+        recWriter.flush();  // make the chunk visible to the reader
+        writeElapsed += clock::now() - writeBegin;
+
+        // --- Read 1000 records ---
+        const auto readBegin = clock::now();
+        for (size_t i = 0; i < kChunkSize; ++i) {
+            auto rec = recReader.nextRecord();
+            sink += rec.getInt8 (idI8);
+            sink += rec.getUInt8 (idU8);
+            sink += rec.getInt16(idI16);
+            sink += rec.getInt32(idI32);
+            sink += rec.getUInt32(idU32, 1);
+            sink += rec.getUInt32(idU32, 2);
+            sink += rec.getInt64(idI64);
+            sink += static_cast<int64_t>(rec.getFloat (idFlt),1);
+            sink += static_cast<int64_t>(rec.getFloat (idFlt),2);
+            sink += static_cast<int64_t>(rec.getDouble(idDbl),1);
+            sink += static_cast<int64_t>(rec.getDouble(idDbl),2);
+        }
+        readElapsed += clock::now() - readBegin;
+
+        totalRecords += kChunkSize;
+    }
+
+    const auto writeMs = std::chrono::duration_cast<std::chrono::milliseconds>(writeElapsed).count();
+    const auto readMs  = std::chrono::duration_cast<std::chrono::milliseconds>(readElapsed).count();
+    const uint64_t writesPerSec = writeMs > 0 ? (totalRecords * 1000ULL) / static_cast<uint64_t>(writeMs) : 0;
+    const uint64_t readsPerSec  = readMs  > 0 ? (totalRecords * 1000ULL) / static_cast<uint64_t>(readMs)  : 0;
+
+    const char* mode = align ? "Aligned" : "Packed";
+    std::cout << "[Perf/" << mode << "] budget: " << budget.count()
+              << " ms, fields/cycle: " << fieldsPerCycle
+              << ", recSize: " << recSize << " bytes"
+              << ", chunk: " << kChunkSize
+              << ", bufferRecords: " << kRecordCount
+              << ", workingSet: " << (recSize * kRecordCount) / 1024 << " KiB\n";
+    std::cout << "[Perf/" << mode << "] Total records processed: " << totalRecords << "\n";
+    std::cout << "[Perf/" << mode << "] Write: " << writeMs << " ms"
+              << "  (" << writesPerSec << " records/s, "
+              <<  writesPerSec * fieldsPerCycle << " field-writes/s)\n";
+    std::cout << "[Perf/" << mode << "] Read : " << readMs  << " ms"
+              << "  (" << readsPerSec  << " records/s, "
+              <<  readsPerSec  * fieldsPerCycle << " field-reads/s)\n";
+    std::cout << "[Perf/" << mode << "] sink (ignore): " << sink << '\n';
+
+    EXPECT_GT(totalRecords, 0u);
+}
+
+// =============================================================================
+// RecRule aligned-layout tests
+// =============================================================================
+// These tests live at the bottom of the file so that the PAttr names they
+// register do not shift the PReg IDs used by the performance benchmark above —
+// keeping benchmark conditions stable across runs.
+
+// Verifies aligned layout: user fields are sorted by decreasing element size
+// (so each one lands on a naturally-aligned offset without internal padding),
+// and the total record size is a multiple of the largest element size so that
+// consecutive records in a packed buffer stay on the same boundary.
+TEST(RecRuleTest, AlignedLayout) {
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("AL_I8",  DataType::dtInt8,   1);   // 1 byte
+    attrs.emplace_back("AL_I32", DataType::dtInt32,  1);   // 4 bytes
+    attrs.emplace_back("AL_Dbl", DataType::dtDouble, 1);   // 8 bytes
+    attrs.emplace_back("AL_I16", DataType::dtInt16,  1);   // 2 bytes
+
+    RecRule rule(attrs, /*align=*/true);
+
+    // Expected layout after sort-by-desc-elem-size (header stays first):
+    //   TimeStamp (dtDouble) @ 0     (8)
+    //   AL_Dbl               @ 8     (8)
+    //   AL_I32               @ 16    (4)
+    //   AL_I16               @ 20    (2)
+    //   AL_I8                @ 22    (1)
+    //   tail padding                 (1)  → total 24 = multiple of 8
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("TimeStamp")), 0u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AL_Dbl")),    8u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AL_I32")),   16u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AL_I16")),   20u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AL_I8")),    22u);
+
+    EXPECT_EQ(rule.getRecSize() % 8u, 0u);
+    EXPECT_EQ(rule.getRecSize(), 24u);
+}
+
+// Verifies that an array field does not break natural alignment of the next
+// smaller field (total size of each field is always a multiple of its own
+// element size, so sequential placement after a desc-size sort stays aligned).
+TEST(RecRuleTest, AlignedArrayField) {
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("AA_Str", DataType::dtChar,  3);   // 3 bytes, elem align 1
+    attrs.emplace_back("AA_I32", DataType::dtInt32, 1);   // 4 bytes, elem align 4
+    attrs.emplace_back("AA_I16", DataType::dtInt16, 1);   // 2 bytes, elem align 2
+
+    RecRule rule(attrs, /*align=*/true);
+
+    // Sorted by elem size desc: I32(4), I16(2), Str(elem=1).
+    // Header Double(8), I32@8, I16@12, Str@14 → 17 bytes → tail pad to 24 (mult of 8).
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AA_I32")),  8u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AA_I16")), 12u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("AA_Str")), 14u);
+    EXPECT_EQ(rule.getRecSize() % 8u, 0u);
+    EXPECT_EQ(rule.getRecSize(), 24u);
+}
+
+// Verifies that the default (align=false) path keeps the historical packed
+// layout and the original field order unchanged.
+TEST(RecRuleTest, PackedLayoutUnchanged) {
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("PK_I8",  DataType::dtInt8,   1);
+    attrs.emplace_back("PK_I32", DataType::dtInt32,  1);
+    attrs.emplace_back("PK_Dbl", DataType::dtDouble, 1);
+
+    RecRule rule(attrs);  // default align=false
+
+    const size_t header = 8;
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("PK_I8")),  header + 0u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("PK_I32")), header + 1u);
+    EXPECT_EQ(rule.getOffsetById(PReg::getID("PK_Dbl")), header + 5u);
+    EXPECT_EQ(rule.getRecSize(), header + 1u + 4u + 8u);
 }
