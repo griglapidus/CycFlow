@@ -105,6 +105,7 @@ private:
 
     size_t m_currentIdx;                 ///< Current index in the active buffer.
     int m_timestampId;
+    size_t m_timestampOffset;
 
     std::vector<uint8_t> m_bufferA;
     std::vector<uint8_t> m_bufferB;

@@ -29,6 +29,7 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
     m_bgBuf = &m_bufferB;
 
     m_timestampId = PReg::getID("TimeStamp");
+    m_timestampOffset = m_rule.getOffsetById(m_timestampId);
 
     LOG_INFO << "RecordWriter created: batchCapacity=" << m_capacity
              << " recSize=" << m_recSize
@@ -73,10 +74,10 @@ Record RecordWriter::nextRecord() {
 void RecordWriter::commitRecord() {
     if (m_currentIdx < m_capacity) {
         uint8_t* ptr = m_activeBuf->data() + (m_currentIdx * m_recSize);
-        Record rec(m_rule, ptr);
 
-        if (rec.getDouble(m_timestampId) == 0.0) {
-            rec.setDouble(m_timestampId, get_current_epoch_time());
+        double &ts = *reinterpret_cast<double*>(ptr + m_timestampOffset);
+        if (ts == 0.0) {
+            ts = get_current_epoch_time();
         }
         ++m_currentIdx;
     }
@@ -113,9 +114,9 @@ void RecordWriter::commitBatch(size_t count) {
 
         for (size_t i = 0; i < count; ++i) {
             uint8_t* ptr = m_activeBuf->data() + ((m_currentIdx + i) * m_recSize);
-            Record rec(m_rule, ptr);
-            if (rec.getDouble(m_timestampId) == 0.0) {
-                rec.setDouble(m_timestampId, get_current_epoch_time());
+            double &ts = *reinterpret_cast<double*>(ptr + m_timestampOffset);
+            if (ts == 0.0) {
+                ts = get_current_epoch_time();
             }
         }
         m_currentIdx += count;
