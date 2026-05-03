@@ -32,6 +32,8 @@ public:
      */
     RecBuffer(const RecRule& rule, size_t capacity);
 
+    // === Data access ===
+
     /**
      * @brief Writes raw record data into the buffer.
      * @param data Pointer to the raw data block containing multiple records.
@@ -72,6 +74,8 @@ public:
      * @return true if successful, false if index is out of bounds or dest is invalid.
      */
     bool copyRecord(size_t index, Record& dest) const;
+
+    // === Service / metadata ===
 
     [[nodiscard]] const RecRule& getRule() const;
     [[nodiscard]] size_t getRecSize() const;

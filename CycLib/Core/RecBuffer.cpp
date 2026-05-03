@@ -14,12 +14,28 @@ RecBuffer::RecBuffer(const RecRule &rule, size_t capacity)
 {
 }
 
+// === Data access ===
+
 void RecBuffer::push(const void *data, size_t count) {
     {
         std::unique_lock<std::shared_mutex> lock(m_dataRwMtx);
         m_impl.push(data, count);
     }
     notifyClients();
+}
+
+size_t RecBuffer::readFromGlobal(uint64_t globalCursor, void *dest, size_t count) const {
+    std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
+
+    uint64_t totalWritten = m_impl.getTotalWritten();
+    size_t currentSize = m_impl.size();
+    uint64_t lag = totalWritten - globalCursor;
+
+    if (lag > currentSize || lag == 0) return 0;
+
+    size_t relativeIndex = currentSize - lag;
+    m_impl.readAt(relativeIndex, dest, count);
+    return count;
 }
 
 void RecBuffer::readRelative(size_t index, void *dest, size_t count) const {
@@ -58,6 +74,8 @@ bool RecBuffer::copyRecord(size_t index, Record& dest) const {
     m_impl.readAt(index, dest.data(), 1);
     return true;
 }
+
+// === Service / metadata ===
 
 const RecRule& RecBuffer::getRule() const { return m_rule; }
 size_t RecBuffer::getRecSize() const { return m_impl.getChunkSize(); }
@@ -108,6 +126,12 @@ void RecBuffer::waitForSpace(const std::function<bool()>& stopCondition) {
     });
 }
 
+void RecBuffer::notifyWriters() {
+    m_spaceCv.notify_all();
+}
+
+// === Private helpers ===
+
 void RecBuffer::notifyClients() const {
     std::lock_guard<std::mutex> lock(m_syncMtx);
     for (auto* client : m_clients) {
@@ -141,24 +165,6 @@ uint64_t RecBuffer::calculateMinReadCursor_nolock() const {
 
     m_phantomReadCursor = minCursor;
     return minCursor;
-}
-
-void RecBuffer::notifyWriters() {
-    m_spaceCv.notify_all();
-}
-
-size_t RecBuffer::readFromGlobal(uint64_t globalCursor, void *dest, size_t count) const {
-    std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
-
-    uint64_t totalWritten = m_impl.getTotalWritten();
-    size_t currentSize = m_impl.size();
-    uint64_t lag = totalWritten - globalCursor;
-
-    if (lag > currentSize || lag == 0) return 0;
-
-    size_t relativeIndex = currentSize - lag;
-    m_impl.readAt(relativeIndex, dest, count);
-    return count;
 }
 
 } // namespace cyc
