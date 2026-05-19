@@ -314,11 +314,13 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
         //   enter → pMax  (vertical excursion up)
         //   pMax  → pMin  (vertical span = min/max bar)
         //   pMin  → exit  (vertical return)
-        // The connector between adjacent pixels arises naturally as the line
-        // (prev.exit @ xPrev) → (next.enter @ xNext) — no explicit connector
-        // points needed.  Since the first sample of a pixel initialises both
-        // enter and {pMin,pMax,exit}, we have enter ∈ [pMin, pMax] and
-        // exit ∈ [pMin, pMax], so the path never moves backwards in y.
+        //
+        // Envelope continuity: when the current pixel's [pMin, pMax] is
+        // disjoint from the previous pixel's range, we stretch the closer
+        // boundary of the current bar so that consecutive bars always touch.
+        // This eliminates visible gaps in the envelope and makes the trace
+        // read as one continuous shape even when the signal slope between
+        // two adjacent samples is much larger than the local oscillation.
         struct PixelData {
             int    px         = -1;
             double enterRatio = 0.0;
@@ -335,18 +337,36 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
         QPolygonF poly;
         poly.reserve(visPixels * 4);
 
+        // Previous emitted pixel's [pMin, pMax] — for the continuity step.
+        bool   hasPrev  = false;
+        double prevPMin = 0.0;
+        double prevPMax = 0.0;
+
         // Converts a normalised ratio to a Y scene coordinate.
         auto ratioToY = [&](double ratio) {
             return chartTop + (1.0 - ratio) * chartH;
         };
 
-        auto emitPixel = [&](const PixelData &pd) {
+        auto emitPixel = [&](PixelData pd) {
             if (!pd.used) return;
+
+            // If the new bar lies entirely above or below the previous one,
+            // pull its near boundary to touch the previous range so the
+            // envelope stays visually connected.
+            if (hasPrev) {
+                if (pd.pMin > prevPMax)      pd.pMin = prevPMax;
+                else if (pd.pMax < prevPMin) pd.pMax = prevPMin;
+            }
+
             const double x = cLeft + pd.px + 0.5;
             poly.append(QPointF(x, ratioToY(pd.enterRatio)));
             poly.append(QPointF(x, ratioToY(pd.pMax)));
             poly.append(QPointF(x, ratioToY(pd.pMin)));
             poly.append(QPointF(x, ratioToY(pd.exitRatio)));
+
+            prevPMin = pd.pMin;
+            prevPMax = pd.pMax;
+            hasPrev  = true;
         };
 
         for (int i = first; i <= last; ++i) {
