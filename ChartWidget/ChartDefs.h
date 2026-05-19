@@ -11,6 +11,7 @@
 #include <variant>
 #include <cstdint>
 #include <cfloat>
+#include <cmath>
 
 // =============================================================================
 //  Shared rendering constants
@@ -291,6 +292,11 @@ Q_DECLARE_METATYPE(QList<SeriesBatch>)
  * returned as-is (the user has explicitly set the Y range).  Otherwise
  * the function falls back to the running minVal/maxVal bounds.
  *
+ * When the data is constant (minVal == maxVal) the interval is expanded
+ * to [v - 1, v + 1] so the chart still renders a grid and the polyline
+ * appears centred in the row.  For an empty series both sentinels remain
+ * inverted (lo > hi) and callers continue to early-out as before.
+ *
  * Use this everywhere a Y axis range is needed — in the delegate (paint),
  * in ChartView (zoom, pan, fit) and in computeGridLabelWidth().
  */
@@ -298,7 +304,11 @@ inline std::pair<double,double> effectiveViewBounds(const ChartSeries &s)
 {
     if (!qIsNaN(s.viewLo) && !qIsNaN(s.viewHi) && s.viewHi > s.viewLo)
         return {s.viewLo, s.viewHi};
-    return {boundsToDouble(s.minVal), boundsToDouble(s.maxVal)};
+    const double lo = boundsToDouble(s.minVal);
+    const double hi = boundsToDouble(s.maxVal);
+    if (lo == hi && std::isfinite(lo))
+        return {lo - 1.0, hi + 1.0};
+    return {lo, hi};
 }
 
 #endif // CHARTDEFS_H
