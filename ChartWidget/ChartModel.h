@@ -9,8 +9,7 @@
 
 #include <QAbstractTableModel>
 #include <QHash>
-#include <QReadWriteLock>
-#include <atomic>
+#include <QThread>
 
 /**
  * @brief Central data model for the Chart widget system.
@@ -34,10 +33,23 @@
  * Calling reapplySeriesColors() after a theme switch re-resolves all
  * auto-assigned colors to the new variant without touching manually set ones.
  *
- * ### Thread safety
- * appendBatch() / appendData() acquire a write lock.
- * All const accessors acquire a read lock.
- * Signal emission always happens on the model's (UI) thread.
+ * ### Thread safety — UI-only contract
+ * All mutating methods (addSeries, appendBatch, appendData, clearSeries,
+ * clearAll, setSeriesViewRange, setSeriesRowHeight, setCursorSample,
+ * setRowHeight, setPixelsPerSample, setHeaderWidth, resetSeriesView,
+ * resetAllDisplayParams, reapplySeriesColors) MUST be called on the UI
+ * (model's) thread.  Calling them from a worker thread is a contract
+ * violation: Debug builds will assert, Release builds invoke UB.
+ *
+ * To feed data from a worker thread, connect the worker's signal to a
+ * model slot with Qt::QueuedConnection — Qt's event loop will marshal
+ * the call onto the UI thread automatically.  This is how CbfReader
+ * (via moveToThread) and CycBufReceiver::ChartConsumer feed the model.
+ *
+ * Const accessors (rowCount, columnCount, data, series, seriesByName,
+ * rowOf, chartPixelWidth, maxSampleCount, cursorSample, pixelsPerSample,
+ * rowHeight, headerWidth) are likewise UI-thread-only — they read the
+ * same state without locks.
  */
 class ChartModel : public QAbstractTableModel
 {
@@ -210,7 +222,7 @@ public:
     void setCursorSample(int sampleIndex);
 
     /** @brief Returns the current cursor sample index (-1 = none). */
-    int cursorSample() const { return m_cursor.load(std::memory_order_relaxed); }
+    int cursorSample() const { return m_cursor; }
 
     /**
      * @brief Re-resolves theme-managed series colors to the given variant.
@@ -264,7 +276,6 @@ private:
      */
     int appendToSeries(ChartSeries &s, const SampleBuffer &src);
 
-    mutable QReadWriteLock      m_lock;
     QHash<QString, ChartSeries> m_data;
     QVector<QString>            m_order;
     QHash<QString, int>         m_rowIndex;
@@ -276,7 +287,7 @@ private:
     /// Counter incremented each time a series receives an auto-assigned color.
     int m_nextColorIndex = 0;
 
-    std::atomic<int> m_cursor{-1};
+    int m_cursor = -1;
 };
 
 // =============================================================================
@@ -286,43 +297,42 @@ private:
 template<typename T>
 void ChartModel::appendData(const QString &name, const QVector<T> &samples)
 {
+    Q_ASSERT(thread() == QThread::currentThread());
     if (samples.isEmpty()) return;
-    int row = -1, newTotal = 0;
-    {
-        QWriteLocker lk(&m_lock);
-        auto it = m_data.find(name);
-        if (it == m_data.end()) return;
-        ChartSeries &s = it.value();
 
-        if (!std::holds_alternative<QVector<T>>(s.data)) {
-            if (sampleIsEmpty(s.data)) { s.data = QVector<T>{}; }
-            else {
-                qFatal("ChartModel::appendData: type mismatch for '%s'", qPrintable(name));
-                return;
-            }
+    auto it = m_data.find(name);
+    if (it == m_data.end()) return;
+    ChartSeries &s = it.value();
+
+    if (!std::holds_alternative<QVector<T>>(s.data)) {
+        if (sampleIsEmpty(s.data)) { s.data = QVector<T>{}; }
+        else {
+            qFatal("ChartModel::appendData: type mismatch for '%s'", qPrintable(name));
+            return;
         }
-
-        auto &vec = std::get<QVector<T>>(s.data);
-        if (vec.capacity() < vec.size() + samples.size())
-            vec.reserve(qMax(vec.size() + samples.size(), vec.capacity() * 2));
-
-        if constexpr (std::is_same_v<T, int64_t>) {
-            auto &lo = std::get<int64_t>(s.minVal); auto &hi = std::get<int64_t>(s.maxVal);
-            for (int64_t v : samples) { if (v < lo) lo = v; if (v > hi) hi = v; }
-        } else if constexpr (std::is_same_v<T, uint64_t>) {
-            auto &lo = std::get<uint64_t>(s.minVal); auto &hi = std::get<uint64_t>(s.maxVal);
-            for (uint64_t v : samples) { if (v < lo) lo = v; if (v > hi) hi = v; }
-        } else {
-            auto &lo = std::get<double>(s.minVal); auto &hi = std::get<double>(s.maxVal);
-            for (const T &v : samples) {
-                const double dv = static_cast<double>(v);
-                if (dv < lo) lo = dv; if (dv > hi) hi = dv;
-            }
-        }
-        vec.append(samples);
-        newTotal = vec.size();
-        row = m_rowIndex.value(name, -1);
     }
+
+    auto &vec = std::get<QVector<T>>(s.data);
+    if (vec.capacity() < vec.size() + samples.size())
+        vec.reserve(qMax(vec.size() + samples.size(), vec.capacity() * 2));
+
+    if constexpr (std::is_same_v<T, int64_t>) {
+        auto &lo = std::get<int64_t>(s.minVal); auto &hi = std::get<int64_t>(s.maxVal);
+        for (int64_t v : samples) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+        auto &lo = std::get<uint64_t>(s.minVal); auto &hi = std::get<uint64_t>(s.maxVal);
+        for (uint64_t v : samples) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    } else {
+        auto &lo = std::get<double>(s.minVal); auto &hi = std::get<double>(s.maxVal);
+        for (const T &v : samples) {
+            const double dv = static_cast<double>(v);
+            if (dv < lo) lo = dv; if (dv > hi) hi = dv;
+        }
+    }
+    vec.append(samples);
+    const int newTotal = vec.size();
+    const int row      = m_rowIndex.value(name, -1);
+
     if (row >= 0) emit dataAppended(name, row, newTotal);
 }
 

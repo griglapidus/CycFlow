@@ -28,6 +28,7 @@ int main() {
         attrs.push_back(PAttr("Current",  DataType::dtFloat,  1));
         attrs.push_back(PAttr("ADC ch0",  DataType::dtInt16,  1));
         attrs.push_back(PAttr("Pressure", DataType::dtDouble, 1));
+        attrs.push_back(PAttr("Const", DataType::dtDouble, 1));
 
         RecRule rule;
         rule.init(attrs);
@@ -37,6 +38,7 @@ int main() {
         int idCurrent = PReg::getID("Current");
         int idAdc     = PReg::getID("ADC ch0");
         int idPres    = PReg::getID("Pressure");
+        int idConst    = PReg::getID("Const");
         int idI0 = PReg::getID("f0");
         int idI1 = PReg::getID("f1");
         int idI2 = PReg::getID("f2");
@@ -97,6 +99,7 @@ int main() {
                 rec.setFloat(idCurrent, cVal);
                 rec.setInt16(idAdc, adcVal);
                 rec.setDouble(idPres, pVal);
+                rec.setDouble(idConst, 23.4);
                 rec.setBit(idI0, b0);
                 rec.setBit(idI1, b1);
                 rec.setBit(idI2, b2);
