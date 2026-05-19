@@ -308,6 +308,17 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     } else {
         // Multiple samples per pixel: reduce to per-pixel min/max envelopes
         // so no data excursion is lost even at extreme zoom-out levels.
+        //
+        // Per-pixel emission writes four points (enter, pMax, pMin, exit) at
+        // the same x coordinate.  drawPolyline connects them as:
+        //   enter → pMax  (vertical excursion up)
+        //   pMax  → pMin  (vertical span = min/max bar)
+        //   pMin  → exit  (vertical return)
+        // The connector between adjacent pixels arises naturally as the line
+        // (prev.exit @ xPrev) → (next.enter @ xNext) — no explicit connector
+        // points needed.  Since the first sample of a pixel initialises both
+        // enter and {pMin,pMax,exit}, we have enter ∈ [pMin, pMax] and
+        // exit ∈ [pMin, pMax], so the path never moves backwards in y.
         struct PixelData {
             int    px         = -1;
             double enterRatio = 0.0;
@@ -320,9 +331,9 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
         const int visPixels  = cRight - cLeft + 2;
         const int iDataLeft  = static_cast<int>(dataLeft);
 
-        PixelData prev, cur;
+        PixelData cur;
         QPolygonF poly;
-        poly.reserve(visPixels * 2);
+        poly.reserve(visPixels * 4);
 
         // Converts a normalised ratio to a Y scene coordinate.
         auto ratioToY = [&](double ratio) {
@@ -331,7 +342,8 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
 
         auto emitPixel = [&](const PixelData &pd) {
             if (!pd.used) return;
-            const double x  = cLeft + pd.px + 0.5;
+            const double x = cLeft + pd.px + 0.5;
+            poly.append(QPointF(x, ratioToY(pd.enterRatio)));
             poly.append(QPointF(x, ratioToY(pd.pMax)));
             poly.append(QPointF(x, ratioToY(pd.pMin)));
             poly.append(QPointF(x, ratioToY(pd.exitRatio)));
@@ -343,16 +355,7 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
             const double ratio = (span > 0.0) ? (v - loD) / span : 0.5;
 
             if (px != cur.px) {
-                if (cur.used) {
-                    if (prev.used) {
-                        const double xP = cLeft + prev.px + 0.5;
-                        const double xC = cLeft + px + 0.5;
-                        poly.append(QPointF(xP, ratioToY(prev.exitRatio)));
-                        poly.append(QPointF(xC, ratioToY(ratio)));
-                    }
-                    emitPixel(cur);
-                }
-                prev = cur;
+                if (cur.used) emitPixel(cur);
                 cur.px         = px;
                 cur.enterRatio = ratio;
                 cur.exitRatio  = ratio;
@@ -365,15 +368,8 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
                 cur.exitRatio = ratio;
             }
         }
-        if (cur.used) {
-            if (prev.used) {
-                const double xP = cLeft + prev.px + 0.5;
-                const double xC = cLeft + cur.px  + 0.5;
-                poly.append(QPointF(xP, ratioToY(prev.exitRatio)));
-                poly.append(QPointF(xC, ratioToY(cur.enterRatio)));
-            }
-            emitPixel(cur);
-        }
+        if (cur.used) emitPixel(cur);
+
         if (!poly.isEmpty())
             p->drawPolyline(poly);
     }
