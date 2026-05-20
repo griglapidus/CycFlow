@@ -278,11 +278,15 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     const int cRight = qMin(clipXRight, cell.right());
     if (cLeft > cRight) return;
 
+    // Rendering origin: sample `origin` is drawn at content x = 0.
+    // All sample-pixel conversions below subtract / add it.
+    const int origin = m_model->displayOriginSample();
+
     // Derive the sample range visible inside the clip region.
     const float dataLeft  = static_cast<float>(cLeft  - cell.left());
     const float dataRight = static_cast<float>(cRight - cell.left());
-    const int first = qMax(0, static_cast<int>(dataLeft / pps));
-    const int last  = qMin(dataSize - 1, static_cast<int>((dataRight + pps) / pps));
+    const int first = qMax(origin, origin + static_cast<int>(dataLeft / pps));
+    const int last  = qMin(dataSize - 1, origin + static_cast<int>((dataRight + pps) / pps));
     if (first > last) return;
 
     // Converts sample index → scene point using the value-space Y bounds.
@@ -291,7 +295,7 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     auto toPoint = [&](int i) -> QPointF {
         const double v     = sampleAt(s.data, i);
         const double ratio = (span > 0.0) ? (v - loD) / span : 0.5;
-        return { cell.left() + i * static_cast<double>(pps),
+        return { cell.left() + (i - origin) * static_cast<double>(pps),
                 chartTop    + (1.0 - ratio) * chartH };
     };
 
@@ -370,7 +374,7 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
         };
 
         for (int i = first; i <= last; ++i) {
-            const int    px    = qBound(0, static_cast<int>(i * pps) - iDataLeft, visPixels);
+            const int    px    = qBound(0, static_cast<int>((i - origin) * pps) - iDataLeft, visPixels);
             const double v     = sampleAt(s.data, i);
             const double ratio = (span > 0.0) ? (v - loD) / span : 0.5;
 
@@ -405,8 +409,9 @@ void ChartDelegate::paintDataImpl(QPainter *p, const QRect &cell,
     }
 
     // Cursor marker — a warm accent colour that stands out on any background.
-    if (cursor >= 0 && cursor < dataSize) {
-        const double cx = cell.left() + cursor * static_cast<double>(pps);
+    // Cursor is an absolute sample index; apply the same origin offset.
+    if (cursor >= origin && cursor < dataSize) {
+        const double cx = cell.left() + (cursor - origin) * static_cast<double>(pps);
         if (cx >= cLeft && cx <= cRight) {
             static const QColor kCursorColor(kCursorColorR, kCursorColorG,
                                              kCursorColorB, kCursorColorA);

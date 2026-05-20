@@ -183,14 +183,37 @@ public:
     int headerWidth() const { return m_headerWidth; }
 
     /**
-     * @brief Returns the total content width in pixels.
+     * @brief Returns the total content width in pixels for the currently
+     *        visible sample window.
      *
-     * Equals maxSampleCount() × pixelsPerSample(), rounded to int.
+     * Equals @c (maxSampleCount() − displayOriginSample()) × pixelsPerSample(),
+     * rounded to int.  Because the window is always advanced (see
+     * setDisplayOriginSample()) to keep its pixel width below QHeaderView's
+     * internal section-size limit, the result always fits in @c int.
      */
     int chartPixelWidth() const;
 
     /** @brief Returns the maximum sample count across all series. */
     int maxSampleCount() const;
+
+    /**
+     * @brief Sample index that is rendered at content x = 0.
+     *
+     * Used as the rendering origin: sample @p i is drawn at content x
+     * @c (i − displayOriginSample()) × pixelsPerSample().  Combined with a
+     * tail-aligned sliding window in ChartView, this lets Live mode follow
+     * arbitrarily long records without hitting QHeaderView's section-size
+     * cap, which would otherwise stop the background from being drawn.
+     */
+    int displayOriginSample() const { return m_displayOriginSample; }
+
+    /**
+     * @brief Sets the rendering origin sample index.
+     *
+     * Triggers a model-wide repaint (via dataChanged with all rows) because
+     * every visible point's content-x coordinate depends on it.
+     */
+    void setDisplayOriginSample(int sampleIndex);
 
     /** @brief Overrides the row height for a single series. */
     void setSeriesRowHeight(const QString &name, int px);
@@ -280,9 +303,10 @@ private:
     QVector<QString>            m_order;
     QHash<QString, int>         m_rowIndex;
 
-    float m_pps              = kDefaultPps;
-    int   m_defaultRowHeight = kDefaultRowHeight;
-    int   m_headerWidth      = kDefaultHeaderWidth;
+    float m_pps                  = kDefaultPps;
+    int   m_defaultRowHeight     = kDefaultRowHeight;
+    int   m_headerWidth          = kDefaultHeaderWidth;
+    int   m_displayOriginSample  = 0;  ///< sample drawn at content x = 0
 
     /// Counter incremented each time a series receives an auto-assigned color.
     int m_nextColorIndex = 0;

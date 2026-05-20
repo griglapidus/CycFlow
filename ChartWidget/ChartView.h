@@ -165,6 +165,17 @@ private:
     void doAutoFitY();
     /** @brief Scrolls horizontally so the newest sample is at the right edge. */
     void scrollToEnd();
+    /**
+     * @brief Updates ChartModel::displayOriginSample so the visible window
+     *        fits inside QHeaderView's section-size limit.
+     *
+     * The sample-pixel arithmetic in QHeaderView / QScrollBar / QRect is
+     * 32-bit, and QHeaderView additionally enforces an internal cap
+     * (`maxSizeSection = 1048575` since Qt 4.2) on each section.  This
+     * routine advances the origin to the tail of the record so the
+     * residual window `(maxSamples − origin) × pps` always fits.
+     */
+    void updateDisplayOrigin();
     int  viewXToSample(int viewX) const;
     int  viewYToRow   (int viewY) const;
     void repaintCursorStrip(int oldSample, int newSample);

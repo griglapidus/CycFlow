@@ -65,6 +65,16 @@ constexpr int kGridLabelFontPt = 9;
 
 // --- paintEvent clip ---------------------------------------------------------
 
+/// Upper bound on the pixel width of a QHeaderView section.
+///
+/// QHeaderView has a hard internal cap (`maxSizeSection = 1048575`,
+/// hard-coded in qheaderview.cpp since Qt 4.2): any `resizeSection()` with
+/// a larger value is silently rejected.  We bound the visible sample
+/// window so the chart's section never exceeds this value; the rest of
+/// the (potentially much longer) record is handled by the rendering
+/// origin in ChartModel::displayOriginSample().
+constexpr int kMaxSectionPx = 1048575;
+
 } // anonymous namespace
 
 // =============================================================================
@@ -138,6 +148,7 @@ void ChartView::syncColumnWidth()
 {
     if (!m_chartModel) return;
     m_gridLabelWidth = -1;  // row heights may have changed, invalidate label cache
+    updateDisplayOrigin();
     horizontalHeader()->resizeSection(0, m_chartModel->chartPixelWidth());
     for (int r = 0; r < m_chartModel->rowCount(); ++r) {
         const ChartSeries *s = m_chartModel->series(r);
@@ -158,9 +169,10 @@ ChartView::VisibleRange ChartView::visibleRangeForRow(int row) const
     const int   scroll = horizontalScrollBar()->value();
     const float pps    = m_chartModel->pixelsPerSample();
     if (pps <= 0) return {0, 0, false};
+    const int origin = m_chartModel->displayOriginSample();
     const int n = sampleCount(s->data);
-    const int f = qMax(0, static_cast<int>(scroll / pps));
-    const int l = qMin(n - 1, static_cast<int>((scroll + viewport()->width()) / pps));
+    const int f = qMax(origin, origin + static_cast<int>(scroll / pps));
+    const int l = qMin(n - 1, origin + static_cast<int>((scroll + viewport()->width()) / pps));
     if (f > l) return {0, 0, false};
 
     const std::size_t bufIdx = s->data.index();
@@ -218,15 +230,33 @@ void ChartView::setLiveMode(bool on)
 void ChartView::scrollToEnd()
 {
     if (!m_chartModel) return;
-    const int colW    = m_chartModel->chartPixelWidth();
-    const int vpW     = viewport()->width();
-    const int maxScr  = qMax(0, colW - vpW);
-    QScrollBar *sb    = horizontalScrollBar();
+    // chartPixelWidth() already reflects the virtualised window
+    // (ChartModel applies displayOriginSample), so it is bounded by
+    // kMaxSectionPx and fits in int without further clamping.
+    const int   colW   = m_chartModel->chartPixelWidth();
+    const int   vpW    = viewport()->width();
+    const int   maxScr = qMax(0, colW - vpW);
+    QScrollBar *sb     = horizontalScrollBar();
     // The scrollbar range may lag behind a recent column-width change
     // (QTableView updates it via queued layout).  Force-extend it so the
     // setValue call below actually reaches the new end.
     if (sb->maximum() < maxScr) sb->setRange(0, maxScr);
     sb->setValue(maxScr);
+}
+
+void ChartView::updateDisplayOrigin()
+{
+    if (!m_chartModel) return;
+    const float pps = m_chartModel->pixelsPerSample();
+    if (pps <= 0.f) return;
+    // Largest number of samples whose pixel span fits in a QHeaderView
+    // section.  Subtracted from the tail to obtain the new origin so the
+    // window always covers the newest data.
+    const int maxVisibleSamples = static_cast<int>(kMaxSectionPx / pps);
+    const int total             = m_chartModel->maxSampleCount();
+    const int newOrigin         = qMax(0, total - maxVisibleSamples);
+    if (newOrigin != m_chartModel->displayOriginSample())
+        m_chartModel->setDisplayOriginSample(newOrigin);
 }
 
 void ChartView::doAutoFitY()
@@ -244,11 +274,14 @@ void ChartView::doAutoFitY()
 int ChartView::viewXToSample(int viewX) const
 {
     if (!m_chartModel) return -1;
-    const int   dataX  = viewX + horizontalScrollBar()->value();
+    const int   dataX = viewX + horizontalScrollBar()->value();
     if (dataX < 0) return -1;
-    const float pps    = m_chartModel->pixelsPerSample();
+    const float pps   = m_chartModel->pixelsPerSample();
     if (pps <= 0.f) return -1;
-    const int sample = static_cast<int>(dataX / pps + 0.5f);
+    // dataX is in window-local pixels; the origin maps the window back
+    // to absolute sample indices.
+    const int sample = m_chartModel->displayOriginSample()
+                       + static_cast<int>(dataX / pps + 0.5f);
     if (sample >= m_chartModel->maxSampleCount()) return -1;
     return sample;
 }
@@ -264,10 +297,13 @@ void ChartView::repaintCursorStrip(int oldSample, int newSample)
     if (!m_chartModel) return;
     const float pps    = m_chartModel->pixelsPerSample();
     const int   scroll = horizontalScrollBar()->value();
+    const int   origin = m_chartModel->displayOriginSample();
     const int   vH     = viewport()->height();
     const int   stripW = qMax(kCursorStripMinWidth, static_cast<int>(pps) + kCursorStripPpsExtra);
 
-    auto toViewX = [&](int s) { return qRound(s * pps) - scroll; };
+    // (s − origin) × pps stays within the window's pixel range (bounded
+    // by kMaxSectionPx), so int arithmetic is safe.
+    auto toViewX = [&](int s) { return qRound((s - origin) * pps) - scroll; };
     if (oldSample >= 0) viewport()->update(QRect(toViewX(oldSample) - stripW/2, 0, stripW, vH));
     if (newSample >= 0) viewport()->update(QRect(toViewX(newSample) - stripW/2, 0, stripW, vH));
 }
@@ -544,19 +580,27 @@ void ChartView::wheelEvent(QWheelEvent *e)
     }
 
     if (ctrlHeld) {
-        // Ctrl+Wheel: zoom X, keeping the pixel under the cursor stationary.
-        const float factor    = (delta > 0) ? kWheelXZoomStep : (1.0f / kWheelXZoomStep);
-        const int   mouseX    = e->position().toPoint().x();
-        const int   oldScroll = horizontalScrollBar()->value();
-        const float oldPps    = m_chartModel->pixelsPerSample();
-        const float newPps    = qBound(ChartModel::kMinPps, oldPps * factor, ChartModel::kMaxPps);
-        const double sampleUnderMouse = (static_cast<double>(oldScroll) + mouseX) / oldPps;
-        const int    newColWidth = qRound(m_chartModel->maxSampleCount() * static_cast<double>(newPps));
-        const int    newScroll   = qMax(0, static_cast<int>(std::round(sampleUnderMouse * newPps)) - mouseX);
+        // Ctrl+Wheel: zoom X, keeping the sample under the cursor stationary.
+        const float  factor    = (delta > 0) ? kWheelXZoomStep : (1.0f / kWheelXZoomStep);
+        const int    mouseX    = e->position().toPoint().x();
+        const int    oldScroll = horizontalScrollBar()->value();
+        const float  oldPps    = m_chartModel->pixelsPerSample();
+        const float  newPps    = qBound(ChartModel::kMinPps, oldPps * factor, ChartModel::kMaxPps);
+
+        // Convert to absolute sample index (independent of origin/scroll/pps)
+        // so we can re-anchor it after the pps + origin change.
+        const int    oldOrigin        = m_chartModel->displayOriginSample();
+        const double sampleUnderMouse = oldOrigin
+                                      + (static_cast<double>(oldScroll) + mouseX) / oldPps;
 
         m_chartModel->setPpsQuiet(newPps);
-        horizontalHeader()->resizeSection(0, newColWidth);
+        updateDisplayOrigin();   // window/origin depend on pps; recompute before geometry
+        const int newOrigin    = m_chartModel->displayOriginSample();
+        const int newColWidth  = m_chartModel->chartPixelWidth();
+        const int newScroll    = qMax(0, static_cast<int>(std::round(
+                                         (sampleUnderMouse - newOrigin) * newPps)) - mouseX);
 
+        horizontalHeader()->resizeSection(0, newColWidth);
         horizontalScrollBar()->setRange(0, qMax(0, newColWidth - viewport()->width()));
         horizontalScrollBar()->setValue(newScroll);
         m_pendingOldSamples = m_chartModel->maxSampleCount();
@@ -632,15 +676,19 @@ void ChartView::keyPressEvent(QKeyEvent *e)
     case Qt::Key_Plus:
     case Qt::Key_Equal:
     case Qt::Key_Minus: {
-        // +/= or -: zoom X around the viewport centre.
-        const float factor    = (e->key() == Qt::Key_Minus) ? (1.0f / kKeyXZoomStep) : kKeyXZoomStep;
-        const int   oldScroll = horizontalScrollBar()->value();
-        const float oldPps    = m_chartModel->pixelsPerSample();
-        const float newPps    = qBound(ChartModel::kMinPps, oldPps * factor, ChartModel::kMaxPps);
-        const int   centerX   = viewport()->width() / 2;
-        const int   dataX     = centerX + oldScroll;
-        const int   newScroll = qMax(0, qRound(dataX * (newPps / oldPps)) - centerX);
-        m_chartModel->setPixelsPerSample(newPps);
+        // +/= or -: zoom X around the sample under the viewport centre.
+        const float  factor    = (e->key() == Qt::Key_Minus) ? (1.0f / kKeyXZoomStep) : kKeyXZoomStep;
+        const int    oldScroll = horizontalScrollBar()->value();
+        const float  oldPps    = m_chartModel->pixelsPerSample();
+        const float  newPps    = qBound(ChartModel::kMinPps, oldPps * factor, ChartModel::kMaxPps);
+        const int    centerX   = viewport()->width() / 2;
+        const int    oldOrigin = m_chartModel->displayOriginSample();
+        const double sampleUnderCenter =
+            oldOrigin + (static_cast<double>(oldScroll) + centerX) / oldPps;
+        m_chartModel->setPixelsPerSample(newPps);   // syncColumnWidth refreshes origin via layoutChanged
+        const int    newOrigin = m_chartModel->displayOriginSample();
+        const int    newScroll = qMax(0, static_cast<int>(std::round(
+                                          (sampleUnderCenter - newOrigin) * newPps)) - centerX);
         horizontalScrollBar()->setValue(newScroll);
         emitVisibleSamplesIfChanged();
         break;
@@ -681,8 +729,9 @@ int ChartView::visibleSampleCount() const
     if (total == 0)  return 0;
     const int scroll = horizontalScrollBar()->value();
     const int vpW    = viewport()->width();
-    const int first  = static_cast<int>(scroll / pps);
-    const int last   = qMin(total - 1, static_cast<int>((scroll + vpW) / pps));
+    const int origin = m_chartModel->displayOriginSample();
+    const int first  = origin + static_cast<int>(scroll / pps);
+    const int last   = qMin(total - 1, origin + static_cast<int>((scroll + vpW) / pps));
     return qMax(0, last - first + 1);
 }
 
@@ -719,17 +768,33 @@ void ChartView::flushPendingAppend()
     const int   newSamples = m_pendingNewSamples;
     m_pendingOldSamples    = newSamples;
 
-    const int newColWidth = qRound(newSamples * static_cast<double>(pps));
+    // Advance the rendering origin so the (visible-sample × pps) section
+    // width never crosses QHeaderView's hard cap (see updateDisplayOrigin).
+    // If the origin moves, every prior pixel of the section maps to a
+    // different sample, so we must force a full repaint (Pass 1's blit
+    // optimisation would otherwise leave stale background pixels behind).
+    const int prevOrigin = m_chartModel->displayOriginSample();
+    updateDisplayOrigin();
+    const int origin = m_chartModel->displayOriginSample();
+    const bool originShifted = origin != prevOrigin;
+
+    const int newColWidth = m_chartModel->chartPixelWidth();
     if (horizontalHeader()->sectionSize(0) != newColWidth)
         horizontalHeader()->resizeSection(0, newColWidth);
 
-    // Repaint only the newly appended pixel columns.
-    const int xStart   = qRound(oldSamples * static_cast<double>(pps)) - scroll;
-    const int xEnd     = newColWidth - scroll;
-    const int visLeft  = qMax(xStart, 0);
-    const int visRight = qMin(xEnd + 1, vpW);
-    if (visLeft < visRight)
-        viewport()->update(QRect(visLeft, 0, visRight - visLeft, vpH));
+    if (originShifted) {
+        // The whole content shifted; nothing the bitmap currently shows
+        // is correct any more.
+        viewport()->update();
+    } else {
+        // Repaint only the newly appended pixel columns.
+        const int xStart   = qRound((oldSamples - origin) * static_cast<double>(pps)) - scroll;
+        const int xEnd     = newColWidth - scroll;
+        const int visLeft  = qMax(xStart, 0);
+        const int visRight = qMin(xEnd + 1, vpW);
+        if (visLeft < visRight)
+            viewport()->update(QRect(visLeft, 0, visRight - visLeft, vpH));
+    }
 
     if (m_liveMode) scrollToEnd();
 

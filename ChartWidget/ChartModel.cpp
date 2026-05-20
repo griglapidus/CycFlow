@@ -135,6 +135,7 @@ void ChartModel::clearAll()
     m_rowIndex.clear();
     m_nextColorIndex = 0;
     m_cursor = -1;
+    m_displayOriginSample = 0;
     endResetModel();
 }
 
@@ -308,7 +309,18 @@ void ChartModel::resetAllDisplayParams()
 
 int ChartModel::chartPixelWidth() const
 {
-    return qRound(maxSampleCount() * static_cast<double>(m_pps));
+    const int visibleSamples = qMax(0, maxSampleCount() - m_displayOriginSample);
+    return qRound(visibleSamples * static_cast<double>(m_pps));
+}
+
+void ChartModel::setDisplayOriginSample(int sampleIndex)
+{
+    Q_ASSERT(thread() == QThread::currentThread());
+    const int clamped = qMax(0, sampleIndex);
+    if (m_displayOriginSample == clamped) return;
+    m_displayOriginSample = clamped;
+    if (!m_order.isEmpty())
+        emit dataChanged(index(0, 0), index(m_order.size() - 1, 0));
 }
 
 int ChartModel::maxSampleCount() const
