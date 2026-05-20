@@ -554,7 +554,16 @@ void ChartView::mouseReleaseEvent(QMouseEvent *e)
 
 void ChartView::leaveEvent(QEvent *e)
 {
-    if (m_chartModel) m_chartModel->setCursorSample(-1);
+    if (m_chartModel) {
+        // In live mode, snap cursor to the newest sample so the header
+        // keeps showing current values even when the mouse is away.
+        if (m_liveMode) {
+            const int n = m_chartModel->maxSampleCount();
+            m_chartModel->setCursorSample(n > 0 ? n - 1 : -1);
+        } else {
+            m_chartModel->setCursorSample(-1);
+        }
+    }
     QTableView::leaveEvent(e);
 }
 
@@ -796,7 +805,15 @@ void ChartView::flushPendingAppend()
             viewport()->update(QRect(visLeft, 0, visRight - visLeft, vpH));
     }
 
-    if (m_liveMode) scrollToEnd();
+    if (m_liveMode) {
+        scrollToEnd();
+        // If the mouse is outside the viewport, keep the cursor pinned to
+        // the newest sample so the header always reflects the latest data.
+        if (!viewport()->underMouse()) {
+            const int n = m_chartModel->maxSampleCount();
+            m_chartModel->setCursorSample(n > 0 ? n - 1 : -1);
+        }
+    }
 
     emitVisibleSamplesIfChanged();
     if (m_autoFitY) doAutoFitY();
