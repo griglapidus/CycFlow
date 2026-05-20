@@ -21,6 +21,30 @@ void TcpServer::registerBuffer(const std::string& name, std::shared_ptr<RecBuffe
     m_buffers[name] = std::make_pair(buffer,batchSize);
 }
 
+void TcpServer::unregisterBuffer(const std::string& name) {
+    // Move matching senders into a local container while holding the locks,
+    // then drop them outside so their destructors (which close the socket and
+    // join the worker thread) run without blocking other server activity.
+    std::vector<std::shared_ptr<TcpDataSender>> sendersToClose;
+    {
+        std::unique_lock<std::shared_mutex> bufLock(m_buffersMtx);
+        m_buffers.erase(name);
+
+        std::lock_guard<std::mutex> sendLock(m_sendersMtx);
+        m_activeSenders.erase(
+            std::remove_if(m_activeSenders.begin(), m_activeSenders.end(),
+                           [&](std::pair<std::string, std::shared_ptr<TcpDataSender>>& entry) {
+                               if (entry.first == name) {
+                                   sendersToClose.push_back(std::move(entry.second));
+                                   return true;
+                               }
+                               return false;
+                           }),
+            m_activeSenders.end()
+        );
+    }
+}
+
 void TcpServer::start() {
     doAccept();
 }
@@ -107,9 +131,23 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
                     std::move(socket)
                 );
 
+                // Re-check the buffer is still registered and publish the sender
+                // atomically against unregisterBuffer(). Lock order:
+                // m_buffersMtx (shared) -> m_sendersMtx.
+                bool registered = false;
                 {
-                    std::lock_guard<std::mutex> lock(m_sendersMtx);
-                    m_activeSenders.push_back(sender);
+                    std::shared_lock<std::shared_mutex> bufLock(m_buffersMtx);
+                    if (m_buffers.find(bufferName) != m_buffers.end()) {
+                        std::lock_guard<std::mutex> sendLock(m_sendersMtx);
+                        m_activeSenders.emplace_back(bufferName, sender);
+                        registered = true;
+                    }
+                }
+
+                if (!registered) {
+                    // Buffer was unregistered between the initial lookup and now;
+                    // drop the sender so the socket is closed.
+                    return;
                 }
 
                 sender->start();
@@ -133,8 +171,8 @@ void TcpServer::cleanupDeadSenders() {
     // Correct erase-remove idiom to safely delete stopped sessions
     m_activeSenders.erase(
         std::remove_if(m_activeSenders.begin(), m_activeSenders.end(),
-                       [](const std::shared_ptr<TcpDataSender>& sender) {
-                           return !sender->isRunning();
+                       [](const std::pair<std::string, std::shared_ptr<TcpDataSender>>& entry) {
+                           return !entry.second->isRunning();
                        }),
         m_activeSenders.end()
     );

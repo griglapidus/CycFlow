@@ -29,6 +29,18 @@ public:
      * @param buffer Shared pointer to the RecBuffer.
      */
     void registerBuffer(const std::string& name, std::shared_ptr<RecBuffer> buffer, size_t batchSize);
+
+    /**
+     * @brief Unregisters a buffer and closes every connection serving it.
+     *
+     * Removes the buffer from the registry and synchronously destroys all
+     * active TcpDataSender sessions tied to it, which shuts down their
+     * sockets and joins their worker threads.
+     *
+     * @param name Buffer name passed to registerBuffer().
+     */
+    void unregisterBuffer(const std::string& name);
+
     void start();
 
 private:
@@ -42,7 +54,10 @@ private:
     std::unordered_map<std::string, std::pair<std::shared_ptr<RecBuffer>, size_t>> m_buffers;
     std::shared_mutex m_buffersMtx;
 
-    std::vector<std::shared_ptr<TcpDataSender>> m_activeSenders;
+    // Each entry pairs the sender with the buffer name it serves, so
+    // unregisterBuffer() can close exactly the matching sessions.
+    // Lock order: m_buffersMtx -> m_sendersMtx (never the reverse).
+    std::vector<std::pair<std::string, std::shared_ptr<TcpDataSender>>> m_activeSenders;
     std::mutex m_sendersMtx;
 };
 

@@ -199,3 +199,65 @@ TEST_F(TcpIntegrationTest, ConnectToNonExistentBufferReturnsError) {
     EXPECT_FALSE(connected);
     EXPECT_EQ(receiver.getBuffer(), nullptr);
 }
+
+// =========================================================================
+// TCP UNREGISTER BUFFER TESTS
+// =========================================================================
+
+TEST_F(TcpIntegrationTest, UnregisterBufferRemovesItFromList) {
+    auto listBefore = TcpServiceClient::requestBufferList(m_host, m_port);
+    ASSERT_EQ(listBefore.size(), 1);
+    EXPECT_EQ(listBefore[0], m_bufferName);
+
+    m_server->unregisterBuffer(m_bufferName);
+
+    auto listAfter = TcpServiceClient::requestBufferList(m_host, m_port);
+    EXPECT_TRUE(listAfter.empty());
+}
+
+TEST_F(TcpIntegrationTest, UnregisterBufferRejectsNewConnections) {
+    m_server->unregisterBuffer(m_bufferName);
+
+    TcpDataReceiver receiver(1000);
+    bool connected = receiver.connect(m_host, m_port, m_bufferName);
+
+    EXPECT_FALSE(connected);
+    EXPECT_EQ(receiver.getBuffer(), nullptr);
+}
+
+TEST_F(TcpIntegrationTest, UnregisterBufferDisconnectsActiveStream) {
+    TcpDataReceiver receiver(1000, 20);
+    ASSERT_TRUE(receiver.connect(m_host, m_port, m_bufferName));
+    ASSERT_TRUE(receiver.isConnected());
+
+    // Push some data so the streaming loop is actively running.
+    for (int i = 0; i < 10; ++i) {
+        pushTestData(static_cast<double>(i), static_cast<double>(i));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    m_server->unregisterBuffer(m_bufferName);
+
+    // Give the receiver's worker loop time to observe the socket shutdown.
+    bool disconnected = false;
+    for (int i = 0; i < 50; ++i) {
+        if (!receiver.isConnected()) {
+            disconnected = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_TRUE(disconnected) << "Receiver was not disconnected after unregisterBuffer";
+
+    // Buffer is gone from the server registry.
+    auto list = TcpServiceClient::requestBufferList(m_host, m_port);
+    EXPECT_TRUE(list.empty());
+}
+
+TEST_F(TcpIntegrationTest, UnregisterUnknownBufferIsNoop) {
+    EXPECT_NO_THROW(m_server->unregisterBuffer("NeverRegistered"));
+
+    auto list = TcpServiceClient::requestBufferList(m_host, m_port);
+    ASSERT_EQ(list.size(), 1);
+    EXPECT_EQ(list[0], m_bufferName);
+}
