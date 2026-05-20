@@ -178,6 +178,16 @@ ChartWidget::ChartWidget(QWidget *parent) : QWidget(parent)
     m_tb->addAction(actAutoFit);
     m_tb->addSeparator();
 
+    auto *actLive = new QAction("Live", m_tb);
+    actLive->setProperty("iconName", "Live.svg");
+    actLive->setCheckable(true);
+    actLive->setChecked(false);
+    actLive->setToolTip("Follow newest data: auto-scroll to the right edge on every append");
+    connect(actLive, &QAction::triggered, m_view, &ChartView::setLiveMode);
+    connect(m_view, &ChartView::liveModeChanged, actLive, &QAction::setChecked);
+    m_tb->addAction(actLive);
+    m_tb->addSeparator();
+
     auto *actReset = new QAction("Reset", m_tb);
     actReset->setProperty("iconName", "Reset.svg");
     actReset->setToolTip("Reset all display parameters");

@@ -54,6 +54,9 @@ public:
     /** @brief Returns the number of samples currently visible in the viewport. */
     int visibleSampleCount() const;
 
+    /** @brief Returns @c true while Live (auto-scroll to newest) mode is on. */
+    bool liveMode() const { return m_liveMode; }
+
 signals:
     /**
      * @brief Emitted when the number of visible samples or the zoom level changes.
@@ -68,6 +71,12 @@ signals:
      */
     void autoFitYChanged(bool on);
 
+    /**
+     * @brief Emitted when the Live mode state changes.
+     * @param on  @c true when Live (auto-scroll) is active.
+     */
+    void liveModeChanged(bool on);
+
 public slots:
     /** @brief Fits all series to the currently visible X range (disables Auto Y). */
     void fitYToVisible();
@@ -80,6 +89,19 @@ public slots:
      * @param on  @c true to enable.
      */
     void setAutoFitY(bool on);
+
+    /** @brief Toggles Live (auto-scroll to newest) mode on/off. */
+    void toggleLiveMode();
+
+    /**
+     * @brief Enables or disables Live mode.
+     *
+     * When Live is on, every data append scrolls the chart horizontally
+     * so the newest sample is at the right edge of the viewport.  The
+     * mode is automatically turned off if the user pans horizontally.
+     * @param on  @c true to enable.
+     */
+    void setLiveMode(bool on);
 
     /** @brief Synchronises the Y scale of @p rows to match @p sourceRow. */
     void syncScale(int sourceRow, const QSet<int> &rows);
@@ -141,6 +163,8 @@ private slots:
 
 private:
     void doAutoFitY();
+    /** @brief Scrolls horizontally so the newest sample is at the right edge. */
+    void scrollToEnd();
     int  viewXToSample(int viewX) const;
     int  viewYToRow   (int viewY) const;
     void repaintCursorStrip(int oldSample, int newSample);
@@ -197,6 +221,7 @@ private:
     int  m_panStartScroll = 0;
 
     bool m_autoFitY = false;
+    bool m_liveMode = false;
 };
 
 #endif // CHARTVIEW_H

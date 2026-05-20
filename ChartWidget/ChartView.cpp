@@ -205,6 +205,30 @@ void ChartView::setAutoFitY(bool on)
     if (on) doAutoFitY();
 }
 
+void ChartView::toggleLiveMode() { setLiveMode(!m_liveMode); }
+
+void ChartView::setLiveMode(bool on)
+{
+    if (m_liveMode == on) return;
+    m_liveMode = on;
+    emit liveModeChanged(on);
+    if (on) scrollToEnd();
+}
+
+void ChartView::scrollToEnd()
+{
+    if (!m_chartModel) return;
+    const int colW    = m_chartModel->chartPixelWidth();
+    const int vpW     = viewport()->width();
+    const int maxScr  = qMax(0, colW - vpW);
+    QScrollBar *sb    = horizontalScrollBar();
+    // The scrollbar range may lag behind a recent column-width change
+    // (QTableView updates it via queued layout).  Force-extend it so the
+    // setValue call below actually reaches the new end.
+    if (sb->maximum() < maxScr) sb->setRange(0, maxScr);
+    sb->setValue(maxScr);
+}
+
 void ChartView::doAutoFitY()
 {
     if (!m_autoFitY || !m_chartModel) return;
@@ -406,7 +430,10 @@ void ChartView::mousePressEvent(QMouseEvent *e)
     if (!m_chartModel) { e->accept(); return; }
 
     if (e->button() == Qt::RightButton) {
-        // Start horizontal pan.
+        // Start horizontal pan.  Manual scrolling and Live mode are
+        // mutually exclusive: as soon as the user grabs the chart to
+        // look back, stop dragging the view to the newest sample.
+        if (m_liveMode) setLiveMode(false);
         m_panning        = true;
         m_panStartX      = e->pos().x();
         m_panStartScroll = horizontalScrollBar()->value();
@@ -703,6 +730,8 @@ void ChartView::flushPendingAppend()
     const int visRight = qMin(xEnd + 1, vpW);
     if (visLeft < visRight)
         viewport()->update(QRect(visLeft, 0, visRight - visLeft, vpH));
+
+    if (m_liveMode) scrollToEnd();
 
     emitVisibleSamplesIfChanged();
     if (m_autoFitY) doAutoFitY();
