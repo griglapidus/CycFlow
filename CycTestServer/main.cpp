@@ -48,8 +48,10 @@ int main() {
         int idI7 = PReg::getID("f7");
 
         // 2. Create Ring Buffer and Writer
-        auto buffer = std::make_shared<RecBuffer>(rule, 10000);
-        RecordWriter writer(buffer, 2000);
+        auto buffer = std::make_shared<RecBuffer>();
+        buffer->init(rule, 10000);
+        RecordWriter writer;
+        writer.init(buffer, 2000);
 
         int port = 5000;
         cyc::TcpServerManager::instance().start(port);

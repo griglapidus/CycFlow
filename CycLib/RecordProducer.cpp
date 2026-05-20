@@ -6,11 +6,17 @@
 namespace cyc {
 
 RecordProducer::RecordProducer(size_t bufferCapacity, size_t writerBatchSize)
-    : m_bufferCapacity(bufferCapacity)
-    , m_writerBatchSize(writerBatchSize)
+    : m_bufferCapacity(0)
+    , m_writerBatchSize(0)
     , m_running(false)
     , m_isInitialized(false)
 {
+    init(bufferCapacity, writerBatchSize);
+}
+
+void RecordProducer::init(size_t bufferCapacity, size_t writerBatchSize) {
+    m_bufferCapacity = bufferCapacity;
+    m_writerBatchSize = writerBatchSize;
     m_writerBatchSize = std::min(std::max(m_writerBatchSize, m_bufferCapacity / 20), m_bufferCapacity);
 }
 

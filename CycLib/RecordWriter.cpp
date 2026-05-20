@@ -10,18 +10,37 @@
 
 namespace cyc {
 
-RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull)
-    : m_target(target)
-    , m_rule(m_target->getRule())
-    , m_recSize(m_target->getRecSize())
-    , m_capacity(batchCapacity)
-    , m_earlyThreshold(std::max<size_t>(1, batchCapacity / 5))
-    , m_blockOnFull(blockOnFull)
+RecordWriter::RecordWriter()
+    : m_recSize(0)
+    , m_capacity(0)
+    , m_earlyThreshold(0)
+    , m_blockOnFull(true)
     , m_currentIdx(0)
+    , m_timestampId(0)
+    , m_timestampOffset(0)
+    , m_activeBuf(nullptr)
+    , m_bgBuf(nullptr)
     , m_bgCount(0)
-    , m_running(true)
+    , m_running(false)
     , m_hasWork(false)
 {
+}
+
+RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull)
+    : RecordWriter()
+{
+    init(target, batchCapacity, blockOnFull);
+}
+
+void RecordWriter::init(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull) {
+    m_target = target;
+    m_rule = m_target->getRule();
+    m_recSize = m_target->getRecSize();
+    m_capacity = batchCapacity;
+    m_earlyThreshold = std::max<size_t>(1, batchCapacity / 5);
+    m_blockOnFull = blockOnFull;
+    m_running.store(true, std::memory_order_release);
+
     // Allocate memory for the double buffers
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);

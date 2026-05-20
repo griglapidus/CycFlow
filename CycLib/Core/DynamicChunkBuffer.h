@@ -23,17 +23,40 @@ namespace cyc {
 class DynamicChunkBuffer {
 public:
     /**
+     * @brief Default constructor. Creates an uninitialized buffer.
+     * Must call init() before use.
+     */
+    DynamicChunkBuffer()
+        : m_totalWritten(0)
+        , m_chunkSize(0)
+        , m_buffer()
+    {}
+
+    /**
      * @brief Constructs the buffer.
      * @param itemCapacity Maximum number of chunks the buffer can hold.
      * @param chunkSize Size of a single chunk in bytes.
      */
     DynamicChunkBuffer(size_t itemCapacity, size_t chunkSize)
-        : m_totalWritten(0)          // 1. Строго соблюдаем порядок инициализации
-        , m_chunkSize(chunkSize)     // 2.
-        , m_buffer(itemCapacity * chunkSize) // 3.
+        : m_totalWritten(0)
+        , m_chunkSize(chunkSize)
+        , m_buffer(itemCapacity * chunkSize)
     {
         assert(itemCapacity > 0);
         assert(chunkSize > 0);
+    }
+
+    /**
+     * @brief Initializes the buffer with the specified capacity and chunk size.
+     * @param itemCapacity Maximum number of chunks the buffer can hold.
+     * @param chunkSize Size of a single chunk in bytes.
+     */
+    void init(size_t itemCapacity, size_t chunkSize) {
+        assert(itemCapacity > 0);
+        assert(chunkSize > 0);
+        m_chunkSize = chunkSize;
+        m_buffer = cyc::CircularBuffer<uint8_t>(itemCapacity * chunkSize);
+        m_totalWritten.store(0, std::memory_order_relaxed);
     }
 
     /**

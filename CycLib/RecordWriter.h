@@ -44,7 +44,13 @@ public:
     };
 
     /**
-     * @brief Constructs the writer.
+     * @brief Default constructor. Leaves the writer uninitialized.
+     * Call init() before using the writer.
+     */
+    RecordWriter();
+
+    /**
+     * @brief Constructs and initializes the writer.
      * @param target Reference to the destination RecBuffer.
      * @param batchCapacity Number of records to hold in each intermediate buffer.
      * @param blockOnFull If true, writer waits for readers to free space.
@@ -52,6 +58,14 @@ public:
      */
     RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull = true);
     ~RecordWriter();
+
+    /**
+     * @brief Initializes the writer. Must be called once on default-constructed instances.
+     * @param target Reference to the destination RecBuffer.
+     * @param batchCapacity Number of records to hold in each intermediate buffer.
+     * @param blockOnFull If true, writer waits for readers to free space.
+     */
+    void init(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull = true);
 
     // --- Single Record API ---
 

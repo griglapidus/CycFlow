@@ -36,12 +36,25 @@ public:
     };
 
     /**
-     * @brief Constructs the reader.
+     * @brief Default constructor. Leaves the reader uninitialized.
+     * Call init() before using the reader.
+     */
+    RecordReader();
+
+    /**
+     * @brief Constructs and initializes the reader.
      * @param target Shared pointer to the source RecBuffer.
      * @param batchCapacity Number of records to read in one batch.
      */
     RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
     ~RecordReader() override;
+
+    /**
+     * @brief Initializes the reader. Must be called once on default-constructed instances.
+     * @param target Shared pointer to the source RecBuffer.
+     * @param batchCapacity Number of records to read in one batch.
+     */
+    void init(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
 
     // --- IRecBufferClient Implementation ---
     void notifyDataAvailable() override;

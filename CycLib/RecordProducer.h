@@ -32,6 +32,15 @@ public:
     virtual ~RecordProducer();
 
     /**
+     * @brief Initializes the producer's configuration.
+     * Called automatically by the constructor. Can be called on a
+     * default-constructed instance to (re)apply configuration before start().
+     * @param bufferCapacity Number of records the circular buffer can hold.
+     * @param writerBatchSize Batch size for the internal RecordWriter.
+     */
+    void init(size_t bufferCapacity = 10000, size_t writerBatchSize = 100);
+
+    /**
      * @brief Starts the background production thread.
      * Automatically triggers initialization if not already done.
      */

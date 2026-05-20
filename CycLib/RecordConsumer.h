@@ -19,8 +19,24 @@ CYCLIB_SUPPRESS_C4251
  */
 class CYCLIB_EXPORT RecordConsumer {
 public:
+    /**
+     * @brief Default constructor. Leaves the consumer uninitialized.
+     * Call init() before using the consumer.
+     */
+    RecordConsumer();
+
+    /**
+     * @brief Constructs and initializes the consumer.
+     */
     RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
     virtual ~RecordConsumer();
+
+    /**
+     * @brief Initializes the consumer. Must be called once on default-constructed instances.
+     * @param buffer Shared pointer to the source RecBuffer.
+     * @param readerBatchSize Batch size for the internal RecordReader.
+     */
+    void init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
 
     /**
      * @brief Starts the consumption thread.

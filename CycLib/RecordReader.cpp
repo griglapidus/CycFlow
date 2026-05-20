@@ -8,19 +8,35 @@
 
 namespace cyc {
 
-RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
-    : m_target(target)
-    , m_rule(target->getRule())
-    , m_recSize(target->getRecSize())
-    , m_capacity(batchCapacity)
+RecordReader::RecordReader()
+    : m_recSize(0)
+    , m_capacity(0)
+    , m_readerCursor(0)
     , m_activeIdx(0)
     , m_activeCount(0)
+    , m_activeBuf(nullptr)
+    , m_bgBuf(nullptr)
     , m_bgCount(0)
     , m_bgIsFull(false)
-    , m_running(true)
+    , m_running(false)
     , m_finishing(false)
     , m_finishTarget(0)
 {
+}
+
+RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity)
+    : RecordReader()
+{
+    init(target, batchCapacity);
+}
+
+void RecordReader::init(std::shared_ptr<RecBuffer> target, size_t batchCapacity) {
+    m_target = target;
+    m_rule = target->getRule();
+    m_recSize = target->getRecSize();
+    m_capacity = batchCapacity;
+    m_running.store(true, std::memory_order_release);
+
     // Initialize the reader cursor. If the buffer already has data,
     // we start reading only the newly incoming data (skipping the old history).
     auto totalAndSize = m_target->getTotalWrittenAndSize();
@@ -54,7 +70,9 @@ RecordReader::RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 
 RecordReader::~RecordReader() {
     stop();
-    m_target->removeClient(this);
+    if (m_target) {
+        m_target->removeClient(this);
+    }
 }
 
 void RecordReader::notifyDataAvailable() {

@@ -5,9 +5,18 @@
 
 namespace cyc {
 
-RecordConsumer::RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize)
+RecordConsumer::RecordConsumer()
     : m_running(false)
 {
+}
+
+RecordConsumer::RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize)
+    : RecordConsumer()
+{
+    init(buffer, readerBatchSize);
+}
+
+void RecordConsumer::init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize) {
     readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20), buffer->capacity());
 
     m_reader = std::make_unique<RecordReader>(buffer, readerBatchSize);

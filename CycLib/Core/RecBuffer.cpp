@@ -7,11 +7,21 @@
 
 namespace cyc {
 
-RecBuffer::RecBuffer(const RecRule &rule, size_t capacity)
-    : m_rule(rule)
-    , m_impl(capacity, rule.getRecSize())
-    , m_phantomReadCursor(0)
+RecBuffer::RecBuffer()
+    : m_phantomReadCursor(0)
 {
+}
+
+RecBuffer::RecBuffer(const RecRule &rule, size_t capacity)
+    : m_phantomReadCursor(0)
+{
+    init(rule, capacity);
+}
+
+void RecBuffer::init(const RecRule &rule, size_t capacity)
+{
+    m_rule = rule;
+    m_impl.init(capacity, rule.getRecSize());
 }
 
 // === Data access ===

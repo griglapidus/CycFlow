@@ -26,11 +26,24 @@ CYCLIB_SUPPRESS_C4251
 class CYCLIB_EXPORT RecBuffer {
 public:
     /**
+     * @brief Default constructor. Creates an uninitialized buffer.
+     * Must call init() before use.
+     */
+    RecBuffer();
+
+    /**
      * @brief Constructs a buffer for a specific rule and capacity.
      * @param rule The schema definition for records stored in this buffer.
      * @param capacity Maximum number of records the buffer can hold.
      */
     RecBuffer(const RecRule& rule, size_t capacity);
+
+    /**
+     * @brief Initializes the buffer with a specific rule and capacity.
+     * @param rule The schema definition for records stored in this buffer.
+     * @param capacity Maximum number of records the buffer can hold.
+     */
+    void init(const RecRule& rule, size_t capacity);
 
     // === Data access ===
 
