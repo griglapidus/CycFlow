@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(CycLib)
 
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
+option(CYCLIB_COPY_ASIO_HEADERS "Copy asio headers to HEADER_DEST_DIR after build" ON)
 
 set(SOURCES
     Core/Common.cpp
@@ -104,6 +105,19 @@ if(DEFINED HEADER_DEST_DIR)
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         )
     endforeach()
+
+    if(CYCLIB_COPY_ASIO_HEADERS AND DEFINED asio_SOURCE_DIR)
+        if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
+            set(COPY_DIR_CMD copy_directory_if_different)
+        else()
+            set(COPY_DIR_CMD copy_directory)
+        endif()
+        add_custom_command(TARGET CycLib POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E ${COPY_DIR_CMD}
+                "${asio_SOURCE_DIR}/asio/include"
+                "${HEADER_DEST_DIR}"
+        )
+    endif()
 endif()
 
 include(GNUInstallDirs)
