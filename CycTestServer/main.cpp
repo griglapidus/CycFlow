@@ -10,6 +10,7 @@
 #include "Core/PAttr.h"
 #include "RecordWriter.h"
 #include "Tcp/TcpServer.h"
+#include "Tcp/TcpServerManager.h"
 #include <asio.hpp>
 #include "Core/PReg.h"
 
@@ -17,8 +18,6 @@ using namespace cyc;
 
 int main() {
     try {
-        asio::io_context io_context;
-
         // 1. Prepare Schema with explicit IDs
         std::vector<PAttr> attrs;
         attrs.push_back(PAttr("Counter",  DataType::dtInt8,   2));
@@ -52,17 +51,9 @@ int main() {
         auto buffer = std::make_shared<RecBuffer>(rule, 10000);
         RecordWriter writer(buffer, 2000);
 
-        // 3. Start TCP Server
-        uint16_t port = 5000;
-        TcpServer server(io_context, port);
-        server.registerBuffer("Buffer_1", buffer, 500);
-        server.start();
-
-        // Start ASIO event loop in a background thread with a work guard
-        std::thread asioThread([&io_context]() {
-            auto workGuard = asio::make_work_guard(io_context);
-            io_context.run();
-        });
+        int port = 5000;
+        cyc::TcpServerManager::instance().start(port);
+        cyc::TcpServerManager::instance().server()->registerBuffer("Buffer_1", buffer, 500);
 
         std::cout << "Data Generator Server running on port " << port << "...\n";
         std::cout << "Buffer registered as 'Buffer_1'\n";
@@ -122,12 +113,6 @@ int main() {
             if (elapsed.count() < intervalMs) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs) - elapsed);
             }
-        }
-
-        // Unreachable in this infinite loop, but good practice for clean exit
-        io_context.stop();
-        if (asioThread.joinable()) {
-            asioThread.join();
         }
     } catch (const std::exception& e) {
         std::cerr << "Server error: " << e.what() << "\n";

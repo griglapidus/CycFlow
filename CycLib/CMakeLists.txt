@@ -23,6 +23,7 @@ set(SOURCES
     Tcp/TcpServiceClient.cpp
     Tcp/TcpDataSender.cpp
     Tcp/TcpDataReceiver.cpp
+    Tcp/TcpServerManager.cpp
 )
 
 set(HEADERS
@@ -51,6 +52,7 @@ set(HEADERS
     Tcp/TcpServiceClient.h
     Tcp/TcpDataSender.h
     Tcp/TcpDataReceiver.h
+    Tcp/TcpServerManager.h
 )
 
 add_library(CycLib ${SOURCES} ${HEADERS}
