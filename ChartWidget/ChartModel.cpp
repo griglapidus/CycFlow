@@ -335,8 +335,6 @@ void ChartModel::setCursorSample(int sampleIndex)
     Q_ASSERT(thread() == QThread::currentThread());
     if (m_cursor == sampleIndex) return;
     m_cursor = sampleIndex;
-    if (!m_order.isEmpty())
-        emit dataChanged(index(0,0), index(m_order.size()-1,0), {CursorSampleRole});
     emit cursorMoved(sampleIndex);
 }
 
