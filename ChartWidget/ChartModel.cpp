@@ -269,7 +269,7 @@ void ChartModel::setSeriesRowHeight(const QString &name, int px)
     if (it->rowHeight == clamped) return;
     it->rowHeight = clamped;
     const int row = m_rowIndex.value(name, -1);
-    if (row >= 0) emit layoutChanged();
+    if (row >= 0) emit seriesRowHeightChanged(name, row, clamped);
 }
 
 void ChartModel::setSeriesViewRange(const QString &name, double lo, double hi)

@@ -125,6 +125,11 @@ void ChartView::setChartModel(ChartModel *model)
                 m_gridLabelWidth = -1;  // Y range may have changed
                 viewport()->update();
             });
+    connect(model, &ChartModel::seriesRowHeightChanged,
+            this, [this](const QString &, int row, int px) {
+                m_gridLabelWidth = -1;  // row height affects label spacing
+                verticalHeader()->resizeSection(row, px);
+            });
     connect(model, &ChartModel::modelReset, this, [this]() {
         m_gridLabelWidth    = -1;
         m_pendingOldSamples = 0;

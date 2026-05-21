@@ -292,6 +292,14 @@ signals:
      */
     void seriesDisplayChanged(const QString &name, int row);
 
+    /**
+     * @brief Emitted when a single series row height changes via setSeriesRowHeight().
+     * @param name  Series name.
+     * @param row   Row index.
+     * @param px    New height in pixels.
+     */
+    void seriesRowHeightChanged(const QString &name, int row, int px);
+
 private:
     /**
      * @brief Appends samples from @p src to @p s and updates running bounds.
