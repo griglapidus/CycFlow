@@ -259,7 +259,7 @@ void ChartHeaderView::contextMenuEvent(QContextMenuEvent *e)
 
 QString ChartHeaderView::formatTimestamp(double epochSec)
 {
-    if (epochSec <= 0 || !std::isfinite(epochSec)) return QStringLiteral("—");
+    if (epochSec < 0 || !std::isfinite(epochSec)) return QStringLiteral("—");
 
     const qint64 wholeSec = static_cast<qint64>(epochSec);
     const int    ms       = static_cast<int>((epochSec - wholeSec) * 1000.0 + 0.5);
