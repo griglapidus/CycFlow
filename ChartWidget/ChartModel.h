@@ -331,7 +331,7 @@ void ChartModel::appendData(const QString &name, const QVector<T> &samples)
     if (!std::holds_alternative<QVector<T>>(s.data)) {
         if (sampleIsEmpty(s.data)) { s.data = QVector<T>{}; }
         else {
-            qFatal("ChartModel::appendData: type mismatch for '%s'", qPrintable(name));
+            qWarning("ChartModel::appendData: type mismatch for '%s' — skipped", qPrintable(name));
             return;
         }
     }
