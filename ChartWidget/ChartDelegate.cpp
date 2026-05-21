@@ -25,24 +25,11 @@ namespace {
 //  Rendering constants
 // =============================================================================
 
-// kChartVPad is defined in ChartDefs.h (included via ChartDelegate.h → ChartModel.h).
-// It is NOT redeclared here to keep a single source of truth.
-
-/// Target number of Y-axis grid intervals (drives "nice step" calculation).
-constexpr double kGridTargetDivisions = 5.0;
-
-/// Grid step is snapped to 1×, 2× or 5× the leading power-of-ten magnitude.
-constexpr double kGridStep2x = 2.0;
-constexpr double kGridStep5x = 5.0;
-
-/// Font size for Y-axis grid labels (Consolas), in points.
-constexpr int kGridLabelFontPt = 9;
+// kChartVPad, kGridTargetDivisions, kGridStep2x/5x, kGridLabelFontPt,
+// kGridLabelMinGap are defined in ChartDefs.h — single source of truth.
 
 /// Horizontal margin between the viewport edge and a grid label (pixels).
 constexpr int kGridLabelMarginX = 3;
-
-/// Minimum pixel gap between consecutive Y-axis labels to avoid overlap.
-constexpr int kGridLabelMinGap = 2;
 
 /// Minimum horizontal gap between the left-side and right-side label columns.
 /// Prevents the two columns from overlapping on narrow rows.
@@ -186,7 +173,13 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
     const double visLo = loD;
     const double visHi = hiD;
 
-    // Choose a "nice" grid step based on ~kGridTargetDivisions visible intervals.
+    QFont lf("Consolas", kGridLabelFontPt);
+    p->setFont(lf);
+    const QFontMetrics fm(lf);
+    const int labelH = fm.height();
+    int       prevLy = INT_MIN;
+
+    // Pass 1: finest "nice" step for ~kGridTargetDivisions divisions (snap down).
     const double rawStep = span / kGridTargetDivisions;
     if (rawStep <= 0 || !std::isfinite(rawStep)) return;
     const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
@@ -194,15 +187,21 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
     if      (rawStep / mag >= kGridStep5x) step = kGridStep5x * mag;
     else if (rawStep / mag >= kGridStep2x) step = kGridStep2x * mag;
 
-    QFont lf("Consolas", kGridLabelFontPt);
-    p->setFont(lf);
-    const QFontMetrics fm(lf);
-    const int labelH = fm.height();
-    int       prevLy = INT_MIN;
+    // Pass 2: if adjacent labels would crowd at this step, snap UP to the next
+    // nice step that guarantees enough vertical spacing.  Without this, the
+    // crowding filter skips alternate labels and flips phase (even ↔ odd
+    // grid lines) each time the range shifts by one step in live/auto-fit mode.
+    const double minStepVal = span * (labelH + kGridLabelMinGap) / chartH;
+    if (step < minStepVal) {
+        const double mag2 = std::pow(10.0, std::floor(std::log10(minStepVal)));
+        if      (minStepVal <= 1.0 * mag2) step = 1.0 * mag2;
+        else if (minStepVal <= 2.0 * mag2) step = 2.0 * mag2;
+        else if (minStepVal <= 5.0 * mag2) step = 5.0 * mag2;
+        else                               step = 10.0  * mag2;
+    }
 
     const double firstGrid = std::ceil(visLo / step) * step;
-    const int    gridCount = static_cast<int>(std::floor((visHi - firstGrid) / step + 0.5)) + 1;
-    for (int k = 0; k < gridCount; ++k) {
+    for (int k = 0; firstGrid + k * step <= visHi + step * 0.5; ++k) {
         const double v     = firstGrid + k * step;
         // ratio=0 → bottom of chart (loD), ratio=1 → top (hiD)
         const double ratio = (v - loD) / span;
@@ -221,12 +220,7 @@ void ChartDelegate::paintBackground(QPainter *p, const QRect &r,
         if (prevLy != INT_MIN && std::abs(ly - prevLy) < labelH + kGridLabelMinGap) continue;
         prevLy = ly;
 
-        // Format: scientific for very large/small values, compact otherwise.
-        QString label;
-        if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
-            label = QString::number(v, 'e', 2);
-        else
-            label = QString::number(v, 'g', 4);
+        const QString label = formatGridLabel(v, step);
 
         // Draw the label at the left edge and mirror it at the right edge.
         p->setPen(cp.gridLabel);

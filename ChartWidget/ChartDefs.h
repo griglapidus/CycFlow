@@ -311,4 +311,47 @@ inline std::pair<double,double> effectiveViewBounds(const ChartSeries &s)
     return {lo, hi};
 }
 
+// =============================================================================
+//  Shared Y-axis grid rendering constants
+// =============================================================================
+
+/// Target number of Y-axis grid intervals (drives "nice step" calculation).
+constexpr double kGridTargetDivisions = 5.0;
+
+/// Grid step is snapped to 1×, 2× or 5× the leading power-of-ten magnitude.
+constexpr double kGridStep2x = 2.0;
+constexpr double kGridStep5x = 5.0;
+
+/// Font size for Y-axis grid labels (Consolas), in points.
+constexpr int kGridLabelFontPt = 9;
+
+/// Minimum pixel gap between consecutive Y-axis labels to avoid overlap.
+constexpr int kGridLabelMinGap = 4;
+
+// =============================================================================
+//  formatGridLabel — shared Y-axis label formatter
+// =============================================================================
+
+/**
+ * @brief Formats a Y-axis grid label in plain decimal notation.
+ *
+ * The number of decimal places matches the precision of @p step, which is
+ * always a "nice" number of the form m × 10^k (m ∈ {1, 2, 5}):
+ *
+ *   step ≥ 1    → 0 decimals  e.g. step=2   → "4", "6", "8"
+ *   step = 0.5  → 1 decimal   e.g. step=0.5 → "3.0", "3.5", "4.0"
+ *   step = 0.02 → 2 decimals  e.g. step=0.02→ "0.01", "0.03", "0.05"
+ *   … and so on.
+ *
+ * The integer part is never abbreviated — large values are shown in full
+ * without scientific notation.
+ */
+inline QString formatGridLabel(double v, double step)
+{
+    const int decimals = (step > 0.0 && std::isfinite(step))
+        ? qMax(0, -static_cast<int>(std::floor(std::log10(step))))
+        : 0;
+    return QString::number(v, 'f', decimals);
+}
+
 #endif // CHARTDEFS_H

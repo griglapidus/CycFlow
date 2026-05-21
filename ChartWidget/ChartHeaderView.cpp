@@ -390,6 +390,14 @@ void ChartHeaderView::paintRow(QPainter *p, const QPalette &pal, const QRect &r,
     // --- Standard layout: analogue rows --------------------------------------
     const QRect tr = r.adjusted(10, 6, -6, -6);
 
+    // Decimal precision for value display — derived from the visible Y span so
+    // the header shows the same resolution as the Y-axis grid labels.
+    const auto [sLo, sHi] = effectiveViewBounds(s);
+    const double vSpan    = sHi - sLo;
+    const int decimals    = (vSpan > 0.0 && std::isfinite(vSpan))
+        ? qMax(0, 3 - static_cast<int>(std::floor(std::log10(vSpan))))
+        : 0;
+
     QFont fn("Consolas", 10, QFont::Bold);
     p->setFont(fn);
     p->setPen(nameColor);
@@ -398,14 +406,10 @@ void ChartHeaderView::paintRow(QPainter *p, const QPalette &pal, const QRect &r,
     p->drawText(tr, Qt::AlignTop | Qt::AlignLeft,
                 p->fontMetrics().elidedText(nameStr, Qt::ElideRight, tr.width()));
 
-    // View-range annotation -- shown when the user has explicitly set Y bounds
-    // (zoom/pan/fit). Hidden in auto-mode (NaN) to avoid visual clutter.
-    // Uses Link colour (accent, readable in both themes).
+    // View-range annotation — shown when the user has explicitly set Y bounds.
     if (!qIsNaN(s.viewLo) && !qIsNaN(s.viewHi) && s.viewHi > s.viewLo) {
-        auto fmtBound = [](double v) -> QString {
-            if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
-                return QString::number(v, 'e', 2);
-            return QString::number(v, 'g', 4);
+        auto fmtBound = [decimals](double v) {
+            return QString::number(v, 'f', decimals);
         };
         QFont fs("Consolas", 9);
         p->setFont(fs);
@@ -427,7 +431,7 @@ void ChartHeaderView::paintRow(QPainter *p, const QPalette &pal, const QRect &r,
         if      (bufIdx == 6) valStr = QString::number(sampleAtI64(s.data, cursor));
         else if (bufIdx == 7) valStr = QString::number(sampleAtU64(s.data, cursor));
         else if (bufIdx <= 5) valStr = QString::number(static_cast<long long>(sampleAt(s.data, cursor)));
-        else                  valStr = QString::number(sampleAt(s.data, cursor), 'g', 6);
+        else                  valStr = QString::number(sampleAt(s.data, cursor), 'f', decimals);
 
         if (isTimestamp) {
             // Show the raw epoch number at the top and the formatted date/time below.

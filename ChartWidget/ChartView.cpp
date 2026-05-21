@@ -55,13 +55,8 @@ constexpr int kGridLabelFallbackWidth = 60;
 /// Right-margin added to the measured max label width (mirrors the delegate).
 constexpr int kGridLabelWidthMargin = 6;
 
-/// Target number of Y-axis grid intervals — must match ChartDelegate.
-constexpr double kGridTargetDivisions = 5.0;
-constexpr double kGridStep2x          = 2.0;
-constexpr double kGridStep5x          = 5.0;
-
-/// Font used for grid label measurement — must match ChartDelegate.
-constexpr int kGridLabelFontPt = 9;
+// kGridTargetDivisions, kGridStep2x/5x, kGridLabelFontPt, kGridLabelMinGap
+// are defined in ChartDefs.h — single source of truth.
 
 // --- paintEvent clip ---------------------------------------------------------
 
@@ -341,24 +336,29 @@ int ChartView::computeGridLabelWidth() const
             const auto [loD, hiD] = effectiveViewBounds(*s);
 
             if (loD < hiD && std::isfinite(loD) && std::isfinite(hiD)) {
-                // The visible range is exactly [loD, hiD].
                 const double visLo = loD, visHi = hiD;
+                const double span  = visHi - visLo;
+                const int    chartH = qMax(1, rowH - kChartVPad);
 
-                const double rawStep = (visHi - visLo) / kGridTargetDivisions;
+                const double rawStep = span / kGridTargetDivisions;
                 if (rawStep > 0 && std::isfinite(rawStep)) {
                     const double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
                     double step = mag;
                     if      (rawStep / mag >= kGridStep5x) step = kGridStep5x * mag;
                     else if (rawStep / mag >= kGridStep2x) step = kGridStep2x * mag;
 
+                    const double minStepVal = span * (fm.height() + kGridLabelMinGap) / chartH;
+                    if (step < minStepVal) {
+                        const double mag2 = std::pow(10.0, std::floor(std::log10(minStepVal)));
+                        if      (minStepVal <= 1.0 * mag2) step = 1.0 * mag2;
+                        else if (minStepVal <= 2.0 * mag2) step = 2.0 * mag2;
+                        else if (minStepVal <= 5.0 * mag2) step = 5.0 * mag2;
+                        else                               step = 10.0  * mag2;
+                    }
+
                     for (double v = std::ceil(visLo / step) * step;
                          v <= visHi + step * 0.5; v += step) {
-                        QString label;
-                        if (std::abs(v) >= 1e6 || (std::abs(v) < 1e-3 && v != 0.0))
-                            label = QString::number(v, 'e', 2);
-                        else
-                            label = QString::number(v, 'g', 4);
-                        maxW = qMax(maxW, fm.horizontalAdvance(label));
+                        maxW = qMax(maxW, fm.horizontalAdvance(formatGridLabel(v, step)));
                     }
                 }
             }
@@ -646,8 +646,9 @@ void ChartView::wheelEvent(QWheelEvent *e)
                     const double chartTopY = rowY + kChartVPad * 0.5;
                     const double mouseY    = e->position().toPoint().y();
                     const double relY      = mouseY - chartTopY;
-                    // ratio: 0 at top (hi), 1 at bottom (lo) — flipped
-                    const double pivotRatio = (chartH > 0) ? (relY / chartH) : 0.5;
+                    // ratio: 0 at top (hi), 1 at bottom (lo) — flipped; clamped so
+                    // a mouse position outside the chart cell stays at the edge.
+                    const double pivotRatio = qBound(0.0, (chartH > 0) ? (relY / chartH) : 0.5, 1.0);
                     const double pivot      = hi - pivotRatio * (hi - lo);
 
                     const double newHalfLo = (pivot - lo) * factor;

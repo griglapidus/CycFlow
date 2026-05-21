@@ -277,10 +277,18 @@ void ChartModel::setSeriesViewRange(const QString &name, double lo, double hi)
     Q_ASSERT(thread() == QThread::currentThread());
     auto it = m_data.find(name);
     if (it == m_data.end()) return;
+    // Reject inverted or degenerate finite ranges — fall back to auto mode.
+    if (!qIsNaN(lo) && !qIsNaN(hi) && hi <= lo) {
+        qWarning("ChartModel::setSeriesViewRange(\"%s\"): hi (%g) <= lo (%g) — resetting to auto",
+                 qPrintable(name), hi, lo);
+        lo = qQNaN();
+        hi = qQNaN();
+    }
     // Guard against no-op (both NaN → both NaN is also a no-op).
-    const bool sameNaN = (qIsNaN(it->viewLo) && qIsNaN(lo)) &&
-                         (qIsNaN(it->viewHi) && qIsNaN(hi));
-    if (!sameNaN && it->viewLo == lo && it->viewHi == hi) return;
+    const bool sameNaN = qIsNaN(it->viewLo) && qIsNaN(lo) &&
+                         qIsNaN(it->viewHi) && qIsNaN(hi);
+    const bool sameVal = it->viewLo == lo && it->viewHi == hi;
+    if (sameNaN || sameVal) return;
     it->viewLo = lo;
     it->viewHi = hi;
     const int row = m_rowIndex.value(name, -1);
