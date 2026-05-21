@@ -174,16 +174,21 @@ ChartView::VisibleRange ChartView::visibleRangeForRow(int row) const
     if (bufIdx == 6) {
         int64_t lo = sampleAtI64(s->data, f), hi = lo;
         for (int i = f+1; i <= l; ++i) { int64_t v = sampleAtI64(s->data,i); if(v<lo) lo=v; if(v>hi) hi=v; }
-        return {static_cast<double>(lo), static_cast<double>(hi), lo != hi};
+        const double dLo = static_cast<double>(lo), dHi = static_cast<double>(hi);
+        if (lo != hi) return {dLo, dHi, true};
+        return {dLo - 1.0, dHi + 1.0, true};
     }
     if (bufIdx == 7) {
         uint64_t lo = sampleAtU64(s->data, f), hi = lo;
         for (int i = f+1; i <= l; ++i) { uint64_t v = sampleAtU64(s->data,i); if(v<lo) lo=v; if(v>hi) hi=v; }
-        return {static_cast<double>(lo), static_cast<double>(hi), lo != hi};
+        const double dLo = static_cast<double>(lo), dHi = static_cast<double>(hi);
+        if (lo != hi) return {dLo, dHi, true};
+        return {dLo - 1.0, dHi + 1.0, true};
     }
     double lo = sampleAt(s->data, f), hi = lo;
     for (int i = f+1; i <= l; ++i) { double v = sampleAt(s->data,i); if(v<lo) lo=v; if(v>hi) hi=v; }
-    return {lo, hi, !qFuzzyCompare(lo, hi)};
+    if (!qFuzzyCompare(lo, hi)) return {lo, hi, true};
+    return {lo - 1.0, hi + 1.0, true};
 }
 
 void ChartView::fitYToVisible()
@@ -777,6 +782,10 @@ void ChartView::flushPendingAppend()
     const int   oldSamples = m_pendingOldSamples;
     const int   newSamples = m_pendingNewSamples;
     m_pendingOldSamples    = newSamples;
+
+    // Data bounds may have grown (auto-range): invalidate the label-width cache
+    // so scrollContentsBy recomputes the dirty strip on the next scroll.
+    m_gridLabelWidth = -1;
 
     // Advance the rendering origin so the (visible-sample × pps) section
     // width never crosses QHeaderView's hard cap (see updateDisplayOrigin).
