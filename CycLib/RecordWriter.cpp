@@ -3,28 +3,13 @@
 
 #define NOMINMAX
 #include "RecordWriter.h"
-#include "Core/PReg.h"
 #include "Core/CycLogger.h"
 #include <algorithm>
 #include <cstring>
 
 namespace cyc {
 
-RecordWriter::RecordWriter()
-    : m_recSize(0)
-    , m_capacity(0)
-    , m_earlyThreshold(0)
-    , m_blockOnFull(true)
-    , m_currentIdx(0)
-    , m_timestampId(0)
-    , m_timestampOffset(0)
-    , m_activeBuf(nullptr)
-    , m_bgBuf(nullptr)
-    , m_bgCount(0)
-    , m_running(false)
-    , m_hasWork(false)
-{
-}
+RecordWriter::RecordWriter() = default;
 
 RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull)
     : RecordWriter()
@@ -33,30 +18,17 @@ RecordWriter::RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapaci
 }
 
 void RecordWriter::init(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull) {
-    m_target = target;
-    m_rule = m_target->getRule();
-    m_recSize = m_target->getRecSize();
-    m_capacity = batchCapacity;
-    m_earlyThreshold = std::max<size_t>(1, batchCapacity / 5);
-    m_blockOnFull = blockOnFull;
+    initBase(target, batchCapacity, blockOnFull);
+    m_earlyThreshold = std::max<size_t>(1, m_capacity / 5);
     m_running.store(true, std::memory_order_release);
 
-    // Allocate memory for the double buffers
     m_bufferA.resize(m_capacity * m_recSize);
     m_bufferB.resize(m_capacity * m_recSize);
     m_activeBuf = &m_bufferA;
-    m_bgBuf = &m_bufferB;
+    m_bgBuf     = &m_bufferB;
 
-    m_timestampId = PReg::getID("TimeStamp");
-    m_timestampOffset = m_rule.getOffsetById(m_timestampId);
+    LOG_INFO << "RecordWriter created: bufferMemory=" << (m_capacity * m_recSize * 2) << "B";
 
-    LOG_INFO << "RecordWriter created: batchCapacity=" << m_capacity
-             << " recSize=" << m_recSize
-             << " bufferMemory=" << (m_capacity * m_recSize * 2) << "B"
-             << " blockOnFull=" << (m_blockOnFull ? "true" : "false")
-             << " targetBufferCapacity=" << m_target->capacity();
-
-    // Start the background flushing thread
     m_worker = std::thread(&RecordWriter::workerLoop, this);
 }
 

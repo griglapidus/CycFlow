@@ -24,11 +24,24 @@ CYCLIB_SUPPRESS_C4251
 class CYCLIB_EXPORT TcpDataReceiver : public RecordProducer {
 public:
     /**
-     * @brief Constructs the receiver.
-     * @param bufferCapacity Maximum number of records the target buffer can hold.
-     * @param writerBatchSize Number of records to request per network transaction.
+     * @brief Constructs the receiver with the default RecordWriter (double-buffered).
      */
     TcpDataReceiver(size_t bufferCapacity = 65536, size_t writerBatchSize = 1000);
+
+    /**
+     * @brief Constructs the receiver with an explicitly chosen writer type.
+     * @code
+     * TcpDataReceiver receiver(UseWriter<RecordWriterZC>{}, 65536, 1000);
+     * @endcode
+     */
+    template<typename WriterType>
+    explicit TcpDataReceiver(UseWriter<WriterType>, size_t bufferCapacity = 65536,
+                             size_t writerBatchSize = 1000)
+        : m_socket(m_ioContext)
+        , m_connected(false)
+    {
+        init<WriterType>(bufferCapacity, writerBatchSize);
+    }
     ~TcpDataReceiver() override;
 
     /**

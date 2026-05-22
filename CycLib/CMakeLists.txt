@@ -11,7 +11,9 @@ set(SOURCES
     Core/RecBuffer.cpp
     Core/RecRule.cpp
     Core/Record.cpp
+    RecordWriterBase.cpp
     RecordWriter.cpp
+    RecordWriterZC.cpp
     RecordReaderBase.cpp
     RecordReader.cpp
     RecordReaderZC.cpp
@@ -39,7 +41,9 @@ set(HEADERS
     Core/CircularBuffer.h
     Core/DynamicChunkBuffer.h
     Core/IRecBufferClient.h
+    RecordWriterBase.h
     RecordWriter.h
+    RecordWriterZC.h
     RecordReaderBase.h
     RecordReader.h
     RecordReaderZC.h

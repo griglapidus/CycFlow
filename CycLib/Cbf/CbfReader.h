@@ -20,16 +20,32 @@ CYCLIB_SUPPRESS_C4251
 class CYCLIB_EXPORT CbfReader : public BatchRecordProducer {
 public:
     /**
-     * @brief Constructs the CBF Reader.
-     * @param filename Path to the input file.
-     * @param bufferCapacity Maximum records the circular buffer can hold.
-     * @param autoStart Automatically start reading in a background thread.
-     * @param writerBatchSize Number of records to read per physical I/O request.
+     * @brief Constructs the CBF reader with the default RecordWriter (double-buffered).
      */
     CbfReader(const std::string& filename,
               size_t bufferCapacity = 100000,
               bool autoStart = true,
               size_t writerBatchSize = 1000);
+
+    /**
+     * @brief Constructs the CBF reader with an explicitly chosen writer type.
+     * @code
+     * CbfReader reader(UseWriter<RecordWriterZC>{}, "data.cbf");
+     * @endcode
+     */
+    template<typename WriterType>
+    CbfReader(UseWriter<WriterType>, const std::string& filename,
+              size_t bufferCapacity = 100000,
+              bool autoStart = true,
+              size_t writerBatchSize = 1000)
+        : m_filename(filename)
+        , m_recordSize(0)
+        , m_valid(false)
+        , m_dataBytesRemaining(0)
+    {
+        init<WriterType>(bufferCapacity, writerBatchSize);
+        if (autoStart) start();
+    }
 
     ~CbfReader() override;
 

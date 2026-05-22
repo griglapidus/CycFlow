@@ -5,19 +5,8 @@
 
 namespace cyc {
 
-RecordProducer::RecordProducer(size_t bufferCapacity, size_t writerBatchSize)
-    : m_bufferCapacity(0)
-    , m_writerBatchSize(0)
-    , m_running(false)
-    , m_isInitialized(false)
-{
-    init(bufferCapacity, writerBatchSize);
-}
-
-void RecordProducer::init(size_t bufferCapacity, size_t writerBatchSize) {
-    m_bufferCapacity = bufferCapacity;
-    m_writerBatchSize = writerBatchSize;
-    m_writerBatchSize = std::min(std::max(m_writerBatchSize, m_bufferCapacity / 20), m_bufferCapacity);
+RecordProducer::RecordProducer(size_t bufferCapacity, size_t writerBatchSize) {
+    init<RecordWriter>(bufferCapacity, writerBatchSize);
 }
 
 RecordProducer::~RecordProducer() {
@@ -25,26 +14,17 @@ RecordProducer::~RecordProducer() {
 }
 
 void RecordProducer::initialize() {
-    // Fast path: lock-free check using acquire semantics
-    if (m_isInitialized.load(std::memory_order_acquire)) {
-        return;
-    }
+    if (m_isInitialized.load(std::memory_order_acquire)) return;
 
-    // Slow path: lock and double-check
     std::lock_guard<std::mutex> lock(m_initMtx);
-    if (m_isInitialized.load(std::memory_order_relaxed)) {
-        return;
-    }
+    if (m_isInitialized.load(std::memory_order_relaxed)) return;
 
     RecRule rule = defineRule();
-    if (rule.getAttributes().empty()) {
-        return;
-    }
+    if (rule.getAttributes().empty()) return;
 
     m_buffer = std::make_shared<RecBuffer>(rule, m_bufferCapacity);
-    m_writer = std::make_unique<RecordWriter>(m_buffer, m_writerBatchSize, true);
+    m_writer = m_writerFactory(m_buffer, m_writerBatchSize);
 
-    // Publish the initialized state safely
     m_isInitialized.store(true, std::memory_order_release);
 }
 
@@ -53,7 +33,7 @@ std::shared_ptr<RecBuffer> RecordProducer::getBuffer() {
     return m_buffer;
 }
 
-RecordWriter& RecordProducer::getWriter() {
+RecordWriterBase& RecordProducer::getWriter() {
     initialize();
     return *m_writer;
 }
@@ -108,7 +88,7 @@ void RecordProducer::workerLoop() {
     onProduceStop();
 }
 
-// --- BatchRecordProducer Implementation ---
+// --- BatchRecordProducer -----------------------------------------------------
 
 void BatchRecordProducer::workerLoop() {
     onProduceStart();

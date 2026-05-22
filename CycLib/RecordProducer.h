@@ -6,43 +6,83 @@
 
 #include "Core/CycLib_global.h"
 #include "Core/RecBuffer.h"
-#include "RecordWriter.h"
+#include "RecordWriter.h"      // default writer type + RecordWriter::RecordBatch alias
 #include "Core/RecRule.h"
+#include <functional>
 
 namespace cyc {
 CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordProducer
- * @brief Abstract base class for generating data records.
+ * @brief Abstract base class for generating records into a RecBuffer.
  *
- * Lazily initializes a RecBuffer and a RecordWriter based on the schema
- * provided by the subclass via `defineRule()`. Manages a background thread
- * to continuously produce data.
+ * Lazily initialises a RecBuffer and a RecordWriterBase-derived writer based on
+ * the schema provided by the subclass via defineRule(). Manages a background
+ * thread that calls produceStep() in a tight loop.
+ *
+ * ### Writer type selection
+ * By default a RecordWriter (double-buffered, async) is created. To use a
+ * different writer pass a UseWriter<T> tag as the first constructor argument,
+ * or call init<WriterType>() before start():
+ * @code
+ * // Via constructor
+ * MyProducer producer(UseWriter<RecordWriterZC>{}, 10000, 100);
+ *
+ * // Via init (must be called before start())
+ * producer.init<RecordWriterZC>(10000, 100);
+ * @endcode
+ *
+ * @see BatchRecordProducer
+ * @see RecordWriter
+ * @see RecordWriterZC
  */
 class CYCLIB_EXPORT RecordProducer {
 public:
     /**
-     * @brief Constructor.
-     * @note RecBuffer is NOT created here. It is lazily instantiated on first use.
-     * @param bufferCapacity Number of records the circular buffer can hold.
-     * @param writerBatchSize Batch size for the internal RecordWriter.
+     * @brief Constructs the producer with the default RecordWriter (double-buffered).
+     * @param bufferCapacity  Number of records the ring buffer can hold.
+     * @param writerBatchSize Batch size for the internal writer.
      */
     RecordProducer(size_t bufferCapacity = 10000, size_t writerBatchSize = 100);
+
+    /**
+     * @brief Constructs the producer with an explicitly chosen writer type.
+     * @code
+     * MyProducer p(UseWriter<RecordWriterZC>{}, 10000, 100);
+     * @endcode
+     */
+    template<typename WriterType>
+    RecordProducer(UseWriter<WriterType>, size_t bufferCapacity = 10000, size_t writerBatchSize = 100)
+        : RecordProducer()
+    {
+        init<WriterType>(bufferCapacity, writerBatchSize);
+    }
+
     virtual ~RecordProducer();
 
     /**
-     * @brief Initializes the producer's configuration.
-     * Called automatically by the constructor. Can be called on a
-     * default-constructed instance to (re)apply configuration before start().
-     * @param bufferCapacity Number of records the circular buffer can hold.
-     * @param writerBatchSize Batch size for the internal RecordWriter.
+     * @brief Configures the producer with the default RecordWriter.
+     *
+     * Must be called before start() on default-constructed instances.
+     * Calling init() after the producer has been started is not supported.
+     *
+     * @tparam WriterType  Writer implementation to use. Defaults to RecordWriter.
+     * @param bufferCapacity  Number of records the ring buffer can hold.
+     * @param writerBatchSize Batch size for the internal writer.
      */
-    void init(size_t bufferCapacity = 10000, size_t writerBatchSize = 100);
+    template<typename WriterType = RecordWriter>
+    void init(size_t bufferCapacity = 10000, size_t writerBatchSize = 100) {
+        m_bufferCapacity  = bufferCapacity;
+        m_writerBatchSize = std::min(std::max(writerBatchSize, bufferCapacity / 20), bufferCapacity);
+        m_writerFactory   = [](std::shared_ptr<RecBuffer> buf, size_t batch) {
+            return std::make_unique<WriterType>(buf, batch, true);
+        };
+    }
 
     /**
      * @brief Starts the background production thread.
-     * Automatically triggers initialization if not already done.
+     * Triggers lazy initialisation of the buffer and writer on first call.
      */
     void start();
 
@@ -59,18 +99,16 @@ public:
     [[nodiscard]] bool isRunning() const;
 
     /**
-     * @brief Provides access to the underlying RecBuffer.
-     * Triggers lazy initialization if called for the first time.
+     * @brief Returns the underlying RecBuffer, triggering lazy init if needed.
      * @return Shared pointer to the buffer.
      */
     std::shared_ptr<RecBuffer> getBuffer();
 
     /**
-     * @brief Provides access to the data writer.
-     * Triggers lazy initialization if called for the first time.
-     * @return Reference to the internal RecordWriter.
+     * @brief Returns the internal writer, triggering lazy init if needed.
+     * @return Reference to the RecordWriterBase instance.
      */
-    RecordWriter& getWriter();
+    RecordWriterBase& getWriter();
 
 protected:
     /**
@@ -83,46 +121,46 @@ protected:
     /**
      * @brief Generates a single record.
      * Must be implemented by the derived class.
-     * @param rec Pre-allocated record to be filled with data.
-     * @return True to continue production, false to stop the thread.
+     * @param rec Pre-allocated record to fill with data.
+     * @return @c true to continue production, @c false to stop the thread.
      */
     virtual bool produceStep(Record& rec) = 0;
 
-    /**
-     * @brief Lifecycle hook called just before the main loop starts.
-     */
+    /** @brief Lifecycle hook called just before the main loop starts. */
     virtual void onProduceStart() {}
 
-    /**
-     * @brief Lifecycle hook called immediately after the main loop terminates.
-     */
+    /** @brief Lifecycle hook called immediately after the main loop terminates. */
     virtual void onProduceStop() {}
 
     virtual void workerLoop();
 
 private:
-    /**
-     * @brief Thread-safe lazy initialization of the buffer and writer.
-     */
+    /** @brief Thread-safe lazy initialisation of the buffer and writer. */
     void initialize();
 
 protected:
-    size_t m_bufferCapacity;
-    size_t m_writerBatchSize;
+    size_t m_bufferCapacity  = 0; ///< Ring buffer capacity in records.
+    size_t m_writerBatchSize = 0; ///< Clamped writer batch size.
 
-    std::shared_ptr<RecBuffer> m_buffer;
-    std::unique_ptr<RecordWriter> m_writer;
+    std::shared_ptr<RecBuffer>        m_buffer;
+    std::unique_ptr<RecordWriterBase> m_writer;
 
-    std::atomic<bool> m_running;
-    std::thread m_worker;
+    std::atomic<bool> m_running{false};
+    std::thread       m_worker;
 
-    std::mutex m_initMtx;
-    std::atomic<bool> m_isInitialized;
+    std::mutex        m_initMtx;
+    std::atomic<bool> m_isInitialized{false};
+
+    /// Factory function set by init<WriterType>(). Called lazily by initialize().
+    std::function<std::unique_ptr<RecordWriterBase>(std::shared_ptr<RecBuffer>, size_t)> m_writerFactory;
 };
 
 /**
  * @class BatchRecordProducer
- * @brief Optimized producer class for generating data in large contiguous blocks.
+ * @brief Producer variant for generating records in large contiguous blocks.
+ *
+ * Overrides the worker loop to call produceBatch() instead of produceStep(),
+ * reducing virtual-call overhead for high-throughput batch producers.
  */
 class CYCLIB_EXPORT BatchRecordProducer : public RecordProducer {
 public:
@@ -130,17 +168,18 @@ public:
 
 protected:
     /**
-     * @brief Blocked single-record production method.
-     * Marked as final to prevent misuse in batch mode.
+     * @brief Blocked single-record method. Marked final to prevent misuse.
      */
     bool produceStep(Record& rec) override final { return false; }
 
     /**
-     * @brief Generates a batch of records.
-     * Must be implemented by the derived class.
-     * @param batch Memory block to be filled with records.
-     * @return The actual number of records written to the batch.
-     * Returning 0 will yield the thread temporarily.
+     * @brief Generates a batch of records into the provided memory block.
+     *
+     * The parameter type is RecordWriter::RecordBatch which is an alias for
+     * RecordWriterBase::RecordBatch — both names refer to the same type.
+     *
+     * @param batch Writable memory block to fill. batch.capacity is the upper bound.
+     * @return The actual number of records written. Returning 0 yields the thread briefly.
      */
     virtual size_t produceBatch(const RecordWriter::RecordBatch& batch) = 0;
 

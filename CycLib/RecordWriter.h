@@ -4,9 +4,7 @@
 #ifndef CYC_RECORDWRITER_H
 #define CYC_RECORDWRITER_H
 
-#include "Core/RecBuffer.h"
-#include "Core/Record.h"
-
+#include "RecordWriterBase.h"
 #include <thread>
 
 namespace cyc {
@@ -14,95 +12,94 @@ CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordWriter
- * @brief Asynchronous writer for RecBuffer using a double-buffering strategy.
+ * @brief Asynchronous, double-buffered writer for RecBuffer.
  *
- * This class allows a producer thread to write records continuously without
- * being blocked by the underlying storage mechanism (RecBuffer).
+ * A dedicated background worker thread flushes filled buffers to the target
+ * RecBuffer while the producer writes into the alternate buffer. The cursor
+ * advances asynchronously, so the producer is decoupled from buffer backpressure.
  *
- * @details
- * It maintains two intermediate buffers (A and B):
- * - **Active Buffer**: Used by the client to write new data via nextRecord() or nextBatch().
- * - **Background Buffer**: Flushed to the target RecBuffer by a worker thread.
+ * ### Memory model
+ * Two private heap buffers (A and B) alternate between "active" (written by the
+ * caller via nextRecord() / nextBatch()) and "background" (being flushed to
+ * RecBuffer by the worker). An early-flush threshold triggers a swap before the
+ * active buffer is fully filled, reducing latency under steady load.
  *
- * When the active buffer fills up, the writer swaps it with the background buffer
- * and signals the worker thread to push the data. Zero-allocation and zero-memset
- * policies are used for maximum throughput.
+ * ### When to use
+ * Prefer this class for high-throughput producers that must never stall on
+ * buffer backpressure. The decoupled flush thread absorbs reader latency spikes.
+ * For simpler or lower-latency cases see RecordWriterZC.
+ *
+ * @see RecordWriterZC
  */
-class CYCLIB_EXPORT RecordWriter {
+class CYCLIB_EXPORT RecordWriter : public RecordWriterBase {
 public:
-    /**
-     * @struct RecordBatch
-     * @brief Represents a contiguous block of memory for batch writing.
-     */
-    struct RecordBatch {
-        uint8_t* data;
-        size_t capacity;
-        const RecRule& rule;
-        size_t recordSize;
-
-        [[nodiscard]] bool isValid() const { return data != nullptr && capacity > 0; }
-    };
+    /// @brief Type alias — preserves source compatibility for code written against
+    ///        the pre-refactor RecordWriter::RecordBatch name.
+    using RecordBatch = RecordWriterBase::RecordBatch;
 
     /**
-     * @brief Default constructor. Leaves the writer uninitialized.
-     * Call init() before using the writer.
+     * @brief Default constructor. Leaves the writer uninitialised.
+     * Call init() before use.
      */
     RecordWriter();
 
     /**
-     * @brief Constructs and initializes the writer.
-     * @param target Reference to the destination RecBuffer.
-     * @param batchCapacity Number of records to hold in each intermediate buffer.
-     * @param blockOnFull If true, writer waits for readers to free space.
-     * If false, writer overwrites old data immediately.
+     * @brief Constructs and initialises the writer.
+     * @param target        Shared pointer to the destination RecBuffer.
+     * @param batchCapacity Number of records each intermediate buffer can hold.
+     * @param blockOnFull   If @c true, the worker stalls when the target is full;
+     *                      if @c false, old data is overwritten immediately.
      */
     RecordWriter(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull = true);
-    ~RecordWriter();
+
+    /** @brief Flushes pending data and stops the worker thread. */
+    ~RecordWriter() override;
 
     /**
-     * @brief Initializes the writer. Must be called once on default-constructed instances.
-     * @param target Reference to the destination RecBuffer.
-     * @param batchCapacity Number of records to hold in each intermediate buffer.
-     * @param blockOnFull If true, writer waits for readers to free space.
+     * @brief Initialises the writer. Must be called once on default-constructed instances.
+     * @param target        Shared pointer to the destination RecBuffer.
+     * @param batchCapacity Number of records each intermediate buffer can hold.
+     * @param blockOnFull   If @c true, the worker stalls when the target is full.
      */
     void init(std::shared_ptr<RecBuffer> target, size_t batchCapacity, bool blockOnFull = true);
 
-    // --- Single Record API ---
+    // -------------------------------------------------------------------------
+    // RecordWriterBase overrides
+    // -------------------------------------------------------------------------
 
     /**
-     * @brief Acquires the next available record slot in the active buffer.
-     * @return A Record object pointing to the memory slot. Call commitRecord() after filling it.
+     * @brief Acquires the next record slot in the active buffer.
+     *
+     * If the active buffer is full, blocks until the background worker finishes
+     * flushing the previous buffer and performs a swap.
+     *
+     * @copydoc RecordWriterBase::nextRecord
      */
-    Record nextRecord();
+    Record nextRecord() override;
 
     /**
-     * @brief Commits the previously acquired record, advancing the internal index.
+     * @brief Timestamps the record and advances the active-buffer index.
+     * @copydoc RecordWriterBase::commitRecord
      */
-    void commitRecord();
-
-    // --- Batch API ---
+    void commitRecord() override;
 
     /**
-     * @brief Acquires a batch of records for bulk writing.
-     * @param maxRecords Maximum number of records requested.
-     * @param wait If true, blocks until the requested capacity is available.
-     * @return A RecordBatch pointing to the available memory block.
+     * @brief Acquires up to @p maxRecords contiguous slots in the active buffer.
+     * @copydoc RecordWriterBase::nextBatch
      */
-    RecordBatch nextBatch(size_t maxRecords, bool wait = true);
+    RecordBatch nextBatch(size_t maxRecords, bool wait = true) override;
 
     /**
-     * @brief Commits a specific number of records written to the current batch.
-     * @param count Number of records successfully written.
+     * @brief Timestamps @p count records and advances the active-buffer index.
+     * @copydoc RecordWriterBase::commitBatch
      */
-    void commitBatch(size_t count);
-
-    // --- Control API ---
+    void commitBatch(size_t count) override;
 
     /**
-     * @brief Forcefully pushes all pending data from the active buffer to the target buffer.
-     * Blocks until the background thread finishes writing.
+     * @brief Forces all pending data into RecBuffer and waits for the worker to finish.
+     * @copydoc RecordWriterBase::flush
      */
-    void flush();
+    void flush() override;
 
 private:
     void stop();
@@ -110,30 +107,22 @@ private:
     void workerLoop();
 
 private:
-    std::shared_ptr<RecBuffer> m_target; ///< Target storage.
-    RecRule m_rule;                      ///< Schema definition.
-    size_t m_recSize;                    ///< Size of a single record in bytes.
-    size_t m_capacity;                   ///< Capacity of intermediate buffers.
-    size_t m_earlyThreshold;             ///< Threshold to attempt early swapping.
-    bool m_blockOnFull;
+    size_t m_earlyThreshold = 0; ///< Active-buffer fill level that triggers an early swap.
+    size_t m_currentIdx     = 0; ///< Next free slot index in the active buffer.
 
-    size_t m_currentIdx;                 ///< Current index in the active buffer.
-    int m_timestampId;
-    size_t m_timestampOffset;
+    std::vector<uint8_t>  m_bufferA;             ///< Primary intermediate buffer.
+    std::vector<uint8_t>  m_bufferB;             ///< Secondary intermediate buffer.
+    std::vector<uint8_t>* m_activeBuf = nullptr; ///< Buffer currently exposed to the caller.
+    std::vector<uint8_t>* m_bgBuf     = nullptr; ///< Buffer currently being flushed by the worker.
 
-    std::vector<uint8_t> m_bufferA;
-    std::vector<uint8_t> m_bufferB;
-    std::vector<uint8_t>* m_activeBuf;   ///< Buffer currently being written to by user.
-    std::vector<uint8_t>* m_bgBuf;       ///< Buffer currently being flushed by worker.
+    std::thread             m_worker;
+    std::mutex              m_mtx;
+    std::condition_variable m_cv;      ///< Signals the worker that a buffer is ready to flush.
+    std::condition_variable m_cv_done; ///< Signals the caller that the worker finished flushing.
 
-    std::thread m_worker;
-    std::mutex m_mtx;
-    std::condition_variable m_cv;        ///< Signals worker that work is available.
-    std::condition_variable m_cv_done;   ///< Signals user that flush is complete.
-
-    size_t m_bgCount;                    ///< Number of records in the background buffer.
-    std::atomic<bool> m_running;
-    bool m_hasWork;                      ///< Flag indicating the worker has data to process.
+    size_t             m_bgCount  = 0;     ///< Records in the background buffer.
+    std::atomic<bool>  m_running{false};   ///< @c true while the worker thread is active.
+    bool               m_hasWork  = false; ///< @c true when the worker has a buffer to flush.
 };
 
 CYCLIB_RESTORE_C4251
