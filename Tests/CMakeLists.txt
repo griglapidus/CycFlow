@@ -20,6 +20,7 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(CycTests
   test_Core.cpp
+  test_ZC.cpp
   test_Cbf.cpp
   test_Csv.cpp
   test_Tcp.cpp

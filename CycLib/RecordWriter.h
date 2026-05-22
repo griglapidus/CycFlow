@@ -102,7 +102,7 @@ public:
     void flush() override;
 
 private:
-    void stop();
+    void shutdownWorker();  ///< Flushes remaining data and joins the worker thread.
     bool swapBuffers(bool blocking);
     void workerLoop();
 

@@ -101,12 +101,25 @@ public:
      */
     void flush() override {}
 
+    /**
+     * @brief Unblocks any thread currently waiting in commitBatch() / commitRecord().
+     *
+     * Sets an internal stop flag so that a pending waitForSpace() returns
+     * immediately even if the target buffer is still full. After stop() any
+     * subsequent commit call that would block is silently skipped.
+     *
+     * Call this before joining the producer thread to avoid a deadlock when
+     * the ring buffer is full and readers have stopped advancing their cursor.
+     */
+    void stop();
+
 private:
     void waitForSpace(size_t needed);
 
 private:
-    std::vector<uint8_t> m_buf;        ///< Single write buffer (no double-buffering).
-    size_t m_pendingCount = 0;         ///< Records reserved by the last nextBatch() call.
+    std::vector<uint8_t>  m_buf;               ///< Single write buffer (no double-buffering).
+    size_t                m_pendingCount = 0;  ///< Records reserved by the last nextBatch() call.
+    std::atomic<bool>     m_running{true};     ///< Set to false by stop() to unblock waitForSpace().
 };
 
 CYCLIB_RESTORE_C4251

@@ -122,6 +122,18 @@ public:
     virtual void flush() = 0;
 
     /**
+     * @brief Signals the writer to stop, unblocking any pending backpressure wait.
+     *
+     * For RecordWriter (buffered) this is a no-op — the destructor handles shutdown.
+     * For RecordWriterZC this unblocks a thread stuck in commitBatch() / commitRecord()
+     * that is waiting for ring-buffer space to become available.
+     *
+     * Call before joining the producer thread when using RecordWriterZC with
+     * blockOnFull=true to avoid a deadlock when readers stop advancing their cursor.
+     */
+    virtual void stop() {}
+
+    /**
      * @brief Returns the record schema of the target buffer.
      * @return Reference to the RecRule describing field layout and types.
      */

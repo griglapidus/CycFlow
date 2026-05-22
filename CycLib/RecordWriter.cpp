@@ -33,10 +33,10 @@ void RecordWriter::init(std::shared_ptr<RecBuffer> target, size_t batchCapacity,
 }
 
 RecordWriter::~RecordWriter() {
-    stop();
+    shutdownWorker();
 }
 
-void RecordWriter::stop() {
+void RecordWriter::shutdownWorker() {
     flush(); // Ensure all remaining data is saved before stopping
     m_running.store(false, std::memory_order_release);
     m_cv.notify_all();

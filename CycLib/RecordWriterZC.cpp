@@ -24,10 +24,21 @@ void RecordWriterZC::init(std::shared_ptr<RecBuffer> target, size_t batchCapacit
 
 // --- helpers -----------------------------------------------------------------
 
+void RecordWriterZC::stop() {
+    m_running.store(false, std::memory_order_release);
+    if (m_target) {
+        m_target->notifyWriters(); // wake any thread blocked in waitForSpace()
+    }
+}
+
 void RecordWriterZC::waitForSpace(size_t needed) {
     if (!m_blockOnFull) return;
-    while (m_target->getAvailableWriteSpace() < needed) {
-        m_target->waitForSpace([this]() { return false; });
+    while (m_running.load(std::memory_order_acquire)
+           && m_target->getAvailableWriteSpace() < needed)
+    {
+        m_target->waitForSpace([this]() {
+            return !m_running.load(std::memory_order_acquire);
+        });
     }
 }
 
@@ -48,7 +59,9 @@ void RecordWriterZC::commitRecord() {
     }
 
     waitForSpace(1);
-    m_target->push(ptr, 1);
+    if (m_running.load(std::memory_order_acquire)) {
+        m_target->push(ptr, 1);
+    }
 }
 
 // --- Batch API ---------------------------------------------------------------
@@ -72,10 +85,13 @@ void RecordWriterZC::commitBatch(size_t count) {
 
     if (m_blockOnFull) {
         size_t pushed = 0;
-        while (pushed < count) {
+        // Check m_running in outer loop: stop() sets it to false to abort the push.
+        while (pushed < count && m_running.load(std::memory_order_acquire)) {
             size_t avail = m_target->getAvailableWriteSpace();
             if (avail == 0) {
-                m_target->waitForSpace([this]() { return false; });
+                m_target->waitForSpace([this]() {
+                    return !m_running.load(std::memory_order_acquire);
+                });
                 continue;
             }
             size_t chunk = std::min(count - pushed, avail);
