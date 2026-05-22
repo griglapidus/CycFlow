@@ -21,14 +21,28 @@ CYCLIB_SUPPRESS_C4251
 class CYCLIB_EXPORT CsvWriter : public BatchRecordConsumer {
 public:
     /**
-     * @brief Constructs the CSV writer.
-     * @param filename Path to the output CSV file.
-     * @param buffer Shared pointer to the source RecBuffer.
-     * @param autoStart If true, the worker thread starts immediately.
-     * @param batchSize Number of records to read and process in one iteration.
+     * @brief Constructs the CSV writer with the default RecordReader (double-buffered).
      */
     CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 100);
+
+    /**
+     * @brief Constructs the CSV writer with an explicitly chosen reader type.
+     * @code
+     * CsvWriter writer(UseReader<RecordReaderZC>{}, "out.csv", buffer);
+     * @endcode
+     */
+    template<typename ReaderType>
+    CsvWriter(UseReader<ReaderType>, const std::string& filename,
+              std::shared_ptr<RecBuffer> buffer,
+              bool autoStart = true, size_t batchSize = 100)
+        : m_filename(filename)
+        , m_delimiter(",")
+    {
+        init<ReaderType>(buffer, batchSize);
+        m_cachedAttrs = getReader().getRule().getAttributes();
+        if (autoStart) start();
+    }
 
     /**
      * @brief Destructor. Ensures the thread is stopped and the file is closed.

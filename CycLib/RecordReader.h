@@ -4,10 +4,7 @@
 #ifndef CYC_RECORDREADER_H
 #define CYC_RECORDREADER_H
 
-#include "Core/RecBuffer.h"
-#include "Core/Record.h"
-#include "Core/IRecBufferClient.h"
-
+#include "RecordReaderBase.h"
 #include <thread>
 
 namespace cyc {
@@ -15,103 +12,106 @@ CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordReader
- * @brief Asynchronous reader for RecBuffer with double-buffered prefetching.
+ * @brief Asynchronous, double-buffered reader for RecBuffer.
  *
- * Minimizes read latency by fetching the next batch of records from the
- * RecBuffer in a background thread while the user processes the current batch.
+ * A dedicated background worker thread pre-fetches the next batch of records
+ * from the ring buffer while the caller processes the current batch.
+ * The reader cursor is advanced immediately after each copy, so writer
+ * backpressure is independent of how long the caller takes to process data.
+ *
+ * ### Memory model
+ * Two private heap buffers (A and B) alternate between "active" (being read by
+ * the caller) and "background" (being filled by the worker). Pointers returned
+ * by nextBatch() point into the active buffer and remain valid until the next
+ * nextBatch() call.
+ *
+ * ### When to use
+ * Prefer this class for slow consumers such as disk writers or any consumer
+ * that may stall (network I/O with flow control, heavy processing).
+ * For low-latency, zero-allocation cases see RecordReaderZC.
+ *
+ * @see RecordReaderZC
  */
-class CYCLIB_EXPORT RecordReader : public IRecBufferClient {
+class CYCLIB_EXPORT RecordReader : public RecordReaderBase {
 public:
-    /**
-     * @struct RecordBatch
-     * @brief Represents a contiguous block of fetched memory.
-     */
-    struct RecordBatch {
-        const uint8_t* data;
-        size_t count;
-        const RecRule& rule;
-        size_t recordSize;
-
-        [[nodiscard]] bool isValid() const { return data != nullptr && count > 0; }
-    };
+    /// @brief Type alias — preserves source compatibility for code written against
+    ///        the pre-refactor RecordReader::RecordBatch name.
+    using RecordBatch = RecordReaderBase::RecordBatch;
 
     /**
-     * @brief Default constructor. Leaves the reader uninitialized.
-     * Call init() before using the reader.
+     * @brief Default constructor. Leaves the reader uninitialised.
+     * Call init() before use.
      */
     RecordReader();
 
     /**
-     * @brief Constructs and initializes the reader.
-     * @param target Shared pointer to the source RecBuffer.
-     * @param batchCapacity Number of records to read in one batch.
+     * @brief Constructs and initialises the reader.
+     * @param target        Shared pointer to the source RecBuffer.
+     * @param batchCapacity Number of records to pre-fetch per background cycle.
      */
     RecordReader(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
+
+    /** @brief Stops the worker thread and unregisters from the buffer. */
     ~RecordReader() override;
 
     /**
-     * @brief Initializes the reader. Must be called once on default-constructed instances.
-     * @param target Shared pointer to the source RecBuffer.
-     * @param batchCapacity Number of records to read in one batch.
+     * @brief Initialises the reader. Must be called once on default-constructed instances.
+     * @param target        Shared pointer to the source RecBuffer.
+     * @param batchCapacity Number of records to pre-fetch per background cycle.
      */
     void init(std::shared_ptr<RecBuffer> target, size_t batchCapacity);
 
-    // --- IRecBufferClient Implementation ---
+    // -------------------------------------------------------------------------
+    // RecordReaderBase overrides
+    // -------------------------------------------------------------------------
+
+    /** @brief Wakes the prefetch worker thread to check for new data. */
     void notifyDataAvailable() override;
-    [[nodiscard]] uint64_t getCursor() const override;
-
-    // --- Control API ---
-    void stop();
-    void finish();
-
-    // --- Read API ---
 
     /**
-     * @brief Fetches the next available batch of records.
-     * @param maxRecords Maximum records to return.
-     * @param wait If true, blocks until data is available.
-     * @return RecordBatch pointing to the data.
+     * @brief Signals the worker thread to stop and blocks until it joins.
+     * @copydoc RecordReaderBase::stop
      */
-    RecordBatch nextBatch(size_t maxRecords, bool wait = true);
+    void stop() override;
 
     /**
-     * @brief Fetches a single record.
-     * @return Record object. Check isValid() to ensure data was retrieved.
+     * @brief Drains all buffered records up to the current write head, then stops.
+     * @copydoc RecordReaderBase::finish
      */
-    Record nextRecord();
+    void finish() override;
 
-    [[nodiscard]] const RecRule& getRule() const { return m_rule; }
+    /**
+     * @brief Returns the next pre-fetched batch.
+     *
+     * If the active buffer is exhausted, waits (when @p wait is @c true) for
+     * the background worker to fill and swap in the next buffer.
+     *
+     * @copydoc RecordReaderBase::nextBatch
+     */
+    RecordBatch nextBatch(size_t maxRecords, bool wait = true) override;
 
 private:
     void workerLoop();
     bool swapBuffers();
 
 private:
-    std::shared_ptr<RecBuffer> m_target;  ///< Source buffer.
-    RecRule m_rule;                       ///< Record schema.
-    size_t m_recSize;                     ///< Size of one record in bytes.
-    size_t m_capacity;                    ///< Batch size.
+    size_t m_activeIdx   = 0;   ///< Next record index within the active buffer.
+    size_t m_activeCount = 0;   ///< Valid record count in the active buffer.
 
-    std::atomic<uint64_t> m_readerCursor; ///< Global cursor position in the RecBuffer.
+    std::vector<uint8_t>  m_bufferA;            ///< Primary copy buffer.
+    std::vector<uint8_t>  m_bufferB;            ///< Secondary copy buffer.
+    std::vector<uint8_t>* m_activeBuf = nullptr; ///< Buffer currently exposed to the caller.
+    std::vector<uint8_t>* m_bgBuf     = nullptr; ///< Buffer currently being filled by the worker.
 
-    size_t m_activeIdx;                   ///< Current read index in the local active buffer.
-    size_t m_activeCount;                 ///< Number of valid records in the active buffer.
+    std::thread             m_worker;
+    std::mutex              m_mtx;
+    std::condition_variable m_cv_user;   ///< Signals the caller when a new batch is ready.
+    std::condition_variable m_cv_worker; ///< Signals the worker to fetch more data.
 
-    std::vector<uint8_t> m_bufferA;
-    std::vector<uint8_t> m_bufferB;
-    std::vector<uint8_t>* m_activeBuf;    ///< Buffer currently being read by user.
-    std::vector<uint8_t>* m_bgBuf;        ///< Buffer currently being filled by worker.
-
-    std::thread m_worker;
-    std::mutex m_mtx;
-    std::condition_variable m_cv_user;    ///< Signals user when data is ready.
-    std::condition_variable m_cv_worker;  ///< Signals worker to fetch more data.
-
-    size_t m_bgCount;                     ///< Number of records prepared in background.
-    bool m_bgIsFull;                      ///< True if background buffer is ready for swap.
-    std::atomic<bool> m_running;
-    bool m_finishing;
-    uint64_t m_finishTarget;
+    size_t   m_bgCount      = 0;     ///< Records written into the background buffer.
+    bool     m_bgIsFull     = false; ///< @c true when the background buffer is ready to swap.
+    bool     m_finishing    = false; ///< @c true after finish() is called.
+    uint64_t m_finishTarget = 0;     ///< Global cursor at which the worker should stop.
 };
 
 CYCLIB_RESTORE_C4251

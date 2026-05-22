@@ -65,6 +65,22 @@ public:
     size_t readFromGlobal(uint64_t globalCursor, void* dest, size_t count) const;
 
     /**
+     * @brief Zero-copy read: returns a direct pointer into the ring buffer.
+     *
+     * The returned pointer is valid as long as the caller's global cursor is not
+     * advanced past @p globalCursor (backpressure prevents the writer from
+     * overwriting the region while it is pinned).
+     *
+     * @param globalCursor Absolute read position.
+     * @param maxRecords   Maximum records the caller wants.
+     * @param outContiguous Set to the number of contiguous records available without
+     *                      wrap-around, capped at @p maxRecords. May be less than @p maxRecords
+     *                      when the requested range crosses the ring-buffer boundary.
+     * @return Pointer to the first record, or nullptr if no data is available.
+     */
+    const uint8_t* getBatchPtrFromGlobal(uint64_t globalCursor, size_t maxRecords, size_t& outContiguous) const;
+
+    /**
      * @brief Reads records relative to the current buffer window.
      * @param index Relative index (0 is the oldest available record in the buffer).
      * @param dest Destination memory buffer.

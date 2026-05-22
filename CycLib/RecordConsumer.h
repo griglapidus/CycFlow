@@ -5,47 +5,66 @@
 #define CYC_RECORDCONSUMER_H
 
 #include "Core/CycLib_global.h"
-#include "RecordReader.h"
+#include "RecordReader.h"       // also pulls in RecordReaderBase.h
+#include <thread>
 
 namespace cyc {
 CYCLIB_SUPPRESS_C4251
 
 /**
  * @class RecordConsumer
- * @brief Base class for consuming records from RecBuffer asynchronously.
+ * @brief Base class for asynchronously consuming records from a RecBuffer.
  *
- * Manages an AsyncRecordReader and a background worker thread.
- * Concrete implementations (e.g., CsvWriter) must override consumeRecord().
+ * Manages a RecordReaderBase-derived reader and a background worker thread.
+ * By default init() creates a RecordReader (double-buffered). To use a
+ * different reader type pass a pre-constructed instance to the second overload:
+ *
+ * @code
+ * consumer.init(std::make_unique<RecordReaderZC>(buffer, batchSize));
+ * @endcode
  */
 class CYCLIB_EXPORT RecordConsumer {
 public:
-    /**
-     * @brief Default constructor. Leaves the consumer uninitialized.
-     * Call init() before using the consumer.
-     */
     RecordConsumer();
+    RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
 
     /**
-     * @brief Constructs and initializes the consumer.
+     * @brief Constructs the consumer with an explicitly chosen reader type.
+     *
+     * @code
+     * RecordConsumer consumer(UseReader<RecordReaderZC>{}, buffer, 512);
+     * @endcode
      */
-    RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
+    template<typename ReaderType>
+    RecordConsumer(UseReader<ReaderType>, std::shared_ptr<RecBuffer> buffer,
+                   size_t readerBatchSize = 100)
+        : RecordConsumer()
+    {
+        init<ReaderType>(buffer, readerBatchSize);
+    }
+
     virtual ~RecordConsumer();
 
     /**
-     * @brief Initializes the consumer. Must be called once on default-constructed instances.
-     * @param buffer Shared pointer to the source RecBuffer.
-     * @param readerBatchSize Batch size for the internal RecordReader.
+     * @brief Initialises the consumer with the specified reader type.
+     *
+     * @tparam ReaderType  Any class derived from RecordReaderBase.
+     *                     Defaults to RecordReader (double-buffered).
+     *                     Pass RecordReaderZC for zero-copy access.
+     *
+     * @code
+     * consumer.init(buffer, batchSize);                     // RecordReader
+     * consumer.init<RecordReaderZC>(buffer, batchSize);     // RecordReaderZC
+     * @endcode
      */
-    void init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100);
+    template<typename ReaderType = RecordReader>
+    void init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100) {
+        readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20),
+                                   buffer->capacity());
+        m_reader = std::make_unique<ReaderType>(buffer, readerBatchSize);
+    }
 
-    /**
-     * @brief Starts the consumption thread.
-     */
     void start();
-
-    /**
-     * @brief Stops the consumption thread immediately without waiting for remaining data.
-     */
     void stop();
 
     /**
@@ -56,52 +75,35 @@ public:
     [[nodiscard]] bool isRunning() const;
 
 protected:
-    /**
-     * @brief Lifecycle hook: Called inside the thread before the main loop starts.
-     */
     virtual void onConsumeStart() {}
-
-    /**
-     * @brief Processes a single record fetched from the buffer.
-     * Must be implemented by the derived class.
-     * @param rec Read-only record view.
-     */
     virtual void consumeRecord(const Record& rec) = 0;
-
-    /**
-     * @brief Lifecycle hook: Called inside the thread after the main loop terminates.
-     */
     virtual void onConsumeStop() {}
 
-    [[nodiscard]] const RecordReader& getReader() const;
+    [[nodiscard]] const RecordReaderBase& getReader() const;
 
     virtual void workerLoop();
 
 protected:
-    std::unique_ptr<RecordReader> m_reader;
+    std::unique_ptr<RecordReaderBase> m_reader;
     std::atomic<bool> m_running;
-    std::thread m_worker;
+    std::thread       m_worker;
 };
 
 /**
  * @class BatchRecordConsumer
- * @brief Optimized consumer class for processing data in large contiguous blocks.
+ * @brief Consumer variant for processing data in large contiguous blocks.
  */
 class CYCLIB_EXPORT BatchRecordConsumer : public RecordConsumer {
 public:
     using RecordConsumer::RecordConsumer;
 
 protected:
-    /**
-     * @brief Blocked single-record consumption method.
-     * Marked as final to prevent misuse in batch mode.
-     */
     void consumeRecord(const Record& rec) override final {}
 
     /**
      * @brief Processes a batch of records at once.
-     * Must be implemented by the derived class.
-     * @param batch A contiguous memory block containing multiple records.
+     * The parameter type is RecordReader::RecordBatch which is an alias for
+     * RecordReaderBase::RecordBatch — both names refer to the same type.
      */
     virtual void consumeBatch(const RecordReader::RecordBatch& batch) = 0;
 

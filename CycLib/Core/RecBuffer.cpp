@@ -48,6 +48,23 @@ size_t RecBuffer::readFromGlobal(uint64_t globalCursor, void *dest, size_t count
     return count;
 }
 
+const uint8_t* RecBuffer::getBatchPtrFromGlobal(uint64_t globalCursor, size_t maxRecords, size_t& outContiguous) const {
+    std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
+
+    uint64_t totalWritten = m_impl.getTotalWritten();
+    size_t   currentSize  = m_impl.size();
+    uint64_t lag          = totalWritten - globalCursor;
+
+    if (lag == 0 || lag > currentSize) {
+        outContiguous = 0;
+        return nullptr;
+    }
+
+    size_t relativeIndex = currentSize - static_cast<size_t>(lag);
+    size_t limitedMax    = std::min(maxRecords, static_cast<size_t>(lag));
+    return m_impl.getBatchPtr(relativeIndex, limitedMax, outContiguous);
+}
+
 void RecBuffer::readRelative(size_t index, void *dest, size_t count) const {
     std::shared_lock<std::shared_mutex> lock(m_dataRwMtx);
     m_impl.readAt(index, dest, count);

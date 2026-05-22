@@ -20,7 +20,22 @@ CYCLIB_SUPPRESS_C4251
  */
 class CYCLIB_EXPORT TcpDataSender : public RecordConsumer {
 public:
-    TcpDataSender(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize, asio::ip::tcp::socket socket);
+    TcpDataSender(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize,
+                  asio::ip::tcp::socket socket);
+
+    /**
+     * @brief Constructs the sender with an explicitly chosen reader type.
+     * @code
+     * TcpDataSender sender(UseReader<RecordReaderZC>{}, buffer, 512, std::move(socket));
+     * @endcode
+     */
+    template<typename ReaderType>
+    TcpDataSender(UseReader<ReaderType>, std::shared_ptr<RecBuffer> buffer,
+                  size_t readerBatchSize, asio::ip::tcp::socket socket)
+        : m_socket(std::move(socket))
+    {
+        init<ReaderType>(buffer, readerBatchSize);
+    }
     ~TcpDataSender() override;
 
 protected:

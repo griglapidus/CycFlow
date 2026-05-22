@@ -12,7 +12,9 @@ set(SOURCES
     Core/RecRule.cpp
     Core/Record.cpp
     RecordWriter.cpp
+    RecordReaderBase.cpp
     RecordReader.cpp
+    RecordReaderZC.cpp
     RecordConsumer.cpp
     RecordProducer.cpp
     Csv/CsvWriter.cpp
@@ -38,7 +40,9 @@ set(HEADERS
     Core/DynamicChunkBuffer.h
     Core/IRecBufferClient.h
     RecordWriter.h
+    RecordReaderBase.h
     RecordReader.h
+    RecordReaderZC.h
     RecordConsumer.h
     RecordProducer.h
     Csv/CsvWriter.h

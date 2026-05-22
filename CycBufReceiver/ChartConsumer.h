@@ -17,6 +17,21 @@ class ChartConsumer : public QObject, public cyc::RecordConsumer {
     Q_OBJECT
 public:
     explicit ChartConsumer(std::shared_ptr<cyc::RecBuffer> buffer, QObject *parent = nullptr);
+
+    /**
+     * @brief Constructs ChartConsumer with an explicitly chosen reader type.
+     * @code
+     * ChartConsumer consumer(cyc::UseReader<cyc::RecordReaderZC>{}, buffer, parent);
+     * @endcode
+     */
+    template<typename ReaderType>
+    explicit ChartConsumer(cyc::UseReader<ReaderType>, std::shared_ptr<cyc::RecBuffer> buffer,
+                           QObject *parent = nullptr)
+        : QObject(parent)
+        , cyc::RecordConsumer(cyc::UseReader<ReaderType>{}, buffer)
+        , m_buffer(buffer)
+    {}
+
     ~ChartConsumer() override;
 
     /**

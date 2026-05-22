@@ -13,14 +13,9 @@ RecordConsumer::RecordConsumer()
 RecordConsumer::RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize)
     : RecordConsumer()
 {
-    init(buffer, readerBatchSize);
+    init<RecordReader>(buffer, readerBatchSize);
 }
 
-void RecordConsumer::init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize) {
-    readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20), buffer->capacity());
-
-    m_reader = std::make_unique<RecordReader>(buffer, readerBatchSize);
-}
 
 RecordConsumer::~RecordConsumer() {
     stop();
@@ -73,7 +68,7 @@ bool RecordConsumer::isRunning() const {
     return m_running.load(std::memory_order_acquire);
 }
 
-const RecordReader& RecordConsumer::getReader() const {
+const RecordReaderBase& RecordConsumer::getReader() const {
     return *m_reader;
 }
 
@@ -84,7 +79,7 @@ void RecordConsumer::workerLoop() {
         Record rec = m_reader->nextRecord();
 
         if (!rec.isValid()) {
-            break; // Reader was stopped or finished
+            break;
         }
 
         consumeRecord(rec);
@@ -94,17 +89,16 @@ void RecordConsumer::workerLoop() {
     onConsumeStop();
 }
 
-// --- BatchRecordConsumer Implementation ---
+// --- BatchRecordConsumer ---
 
 void BatchRecordConsumer::workerLoop() {
     onConsumeStart();
 
     while (m_running.load(std::memory_order_relaxed)) {
-        // Fetch up to the entire internal capacity defined in RecordReader
         auto batch = m_reader->nextBatch(SIZE_MAX, true);
 
         if (!batch.isValid()) {
-            break; // Reader was stopped or finished
+            break;
         }
 
         consumeBatch(batch);

@@ -99,6 +99,34 @@ public:
     }
 
     /**
+     * @brief Zero-copy access to a contiguous run of chunks.
+     *
+     * Returns a direct pointer into the ring buffer's backing array starting at
+     * @p relChunkIdx (relative to the oldest element). The caller must not read
+     * more than @p outContiguous chunks — beyond that the data wraps around and
+     * is no longer physically contiguous.
+     *
+     * @param relChunkIdx Relative chunk index (0 = oldest element in buffer).
+     * @param maxChunks   Upper bound requested by the caller.
+     * @param outContiguous Set to the actual number of contiguous chunks available
+     *                      without wrap-around, capped at @p maxChunks.
+     * @return Pointer to the first byte of chunk @p relChunkIdx.
+     *
+     * @warning Must be called while the caller holds a shared lock on the owning
+     *          RecBuffer's data mutex, so that m_head is stable.
+     */
+    const uint8_t* getBatchPtr(size_t relChunkIdx, size_t maxChunks, size_t& outContiguous) const {
+        size_t itemCap  = capacity();
+        size_t headChunk = m_buffer.get_head_index_unsafe() / m_chunkSize;
+        size_t physChunkIdx = (headChunk + relChunkIdx) % itemCap;
+
+        size_t avail = itemCap - physChunkIdx;
+        outContiguous = std::min(maxChunks, avail);
+
+        return m_buffer.get_ptr_unsafe(relChunkIdx * m_chunkSize);
+    }
+
+    /**
      * @brief Gets the total number of chunks written since creation.
      * @note Thread-safe (atomic load with acquire semantics).
      * @return Total count.
