@@ -673,3 +673,167 @@ TEST_P(ZCBatchSweepTest, WriterZC_ReaderZC_BatchSweep) {
     runBatchSweep<RecordWriterZC, RecordReaderZC>(
         align, align ? "WriterZC+ReaderZC Aligned" : "WriterZC+ReaderZC Packed");
 }
+
+// =============================================================================
+// Dual-writer / dual-reader stress test
+//
+// Two concurrent RecordWriter instances (buffered, double-buffered + worker
+// thread) share one RecBuffer with two independent readers. RecordWriter is
+// required here because the system does not support multiple simultaneous
+// zero-copy (ZC) writers.
+//
+// Both readers independently consume every record written by both writers, so
+// the buffer must serve two read cursors. The test runs for 3 seconds to expose
+// race conditions and deadlocks that short tests may miss.
+// =============================================================================
+
+template<typename ReaderT>
+void runDualWriterDualReader(bool align, const char* label)
+{
+    std::vector<PAttr> attrs;
+    attrs.emplace_back("MW2R2_I32", DataType::dtInt32);
+    attrs.emplace_back("MW2R2_I64", DataType::dtInt64);
+    RecRule rule(attrs, align);
+
+    const int    idI32      = PReg::getID("MW2R2_I32");
+    const int    idI64      = PReg::getID("MW2R2_I64");
+    const size_t recSize    = rule.getRecSize();
+    const size_t kBuf       = 256000;
+    const size_t kBatchSize = 4000;
+
+    auto buffer = std::make_shared<RecBuffer>(rule, kBuf);
+
+    RecordWriter writer1(buffer, kBatchSize);
+    RecordWriter writer2(buffer, kBatchSize);
+    ReaderT      reader1(buffer, kBatchSize);
+    ReaderT      reader2(buffer, kBatchSize);
+
+    using clock = std::chrono::steady_clock;
+    const auto budget = std::chrono::milliseconds(3000);
+
+    std::atomic<bool>     stopFlag{false};
+    std::atomic<uint64_t> writtenA{0}, writtenB{0};
+    std::atomic<uint64_t> readC{0},    readD{0};
+    std::atomic<int64_t>  sinkC{0},    sinkD{0};
+
+    auto writerTask = [&](RecordWriter& wr, std::atomic<uint64_t>& cnt) {
+        uint64_t counter = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            auto batch = wr.nextBatch(kBatchSize, /*wait=*/true);
+            if (!batch.isValid()) break;
+            for (size_t i = 0; i < batch.capacity; ++i) {
+                Record rec(batch.rule, batch.data + i * batch.recordSize);
+                rec.setInt32(idI32, static_cast<int32_t>(counter));
+                rec.setInt64(idI64, static_cast<int64_t>(counter));
+                ++counter;
+            }
+            wr.commitBatch(batch.capacity);
+        }
+        wr.flush();
+        cnt.store(counter);
+    };
+
+    auto readerTask = [&](ReaderT& rd, std::atomic<uint64_t>& cnt, std::atomic<int64_t>& sink) {
+        int64_t  localSink = 0;
+        uint64_t localCnt  = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            auto batch = rd.nextBatch(kBatchSize, /*wait=*/false);
+            if (!batch.isValid()) { std::this_thread::yield(); continue; }
+            for (size_t i = 0; i < batch.count; ++i) {
+                Record rec(batch.rule,
+                           const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+                localSink += rec.getInt32(idI32);
+                localSink += rec.getInt64(idI64);
+            }
+            localCnt += batch.count;
+        }
+        cnt.store(localCnt);
+        sink.store(localSink);
+    };
+
+    const auto runStart = clock::now();
+
+    std::thread tw1([&] { writerTask(writer1, writtenA); });
+    std::thread tw2([&] { writerTask(writer2, writtenB); });
+    std::thread tr1([&] { readerTask(reader1, readC, sinkC); });
+    std::thread tr2([&] { readerTask(reader2, readD, sinkD); });
+
+    std::this_thread::sleep_for(budget);
+    stopFlag.store(true, std::memory_order_relaxed);
+
+    // Readers poll with wait=false so they exit quickly once stopFlag is set.
+    tr1.join();
+    tr2.join();
+    // Unpin any ZC batch so that writer flush() can push remaining data.
+    // For RecordReader this is a no-op.
+    reader1.release();
+    reader2.release();
+
+    // Writer threads exit their loops, call flush(), then terminate.
+    // Flush can now proceed because readers unpinned their cursors above.
+    tw1.join();
+    tw2.join();
+
+    const auto elapsed   = clock::now() - runStart;
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    const uint64_t ms    = static_cast<uint64_t>(elapsedMs > 0 ? elapsedMs : 1);
+
+    const uint64_t wA = writtenA.load();
+    const uint64_t wB = writtenB.load();
+    const uint64_t rC = readC.load();
+    const uint64_t rD = readD.load();
+
+    std::cout << "[DualW2R/" << label << "] budget: " << budget.count()
+              << " ms, elapsed: " << elapsedMs << " ms"
+              << ", recSize: " << recSize << " B"
+              << ", batch: " << kBatchSize << ", buf: " << kBuf << "\n";
+    std::cout << "[DualW2R/" << label << "] WriterA: " << wA
+              << " rec (" << wA * 1000ULL / ms << " rec/s)\n";
+    std::cout << "[DualW2R/" << label << "] WriterB: " << wB
+              << " rec (" << wB * 1000ULL / ms << " rec/s)\n";
+    std::cout << "[DualW2R/" << label << "] Total written: " << (wA + wB)
+              << " rec (" << (wA + wB) * 1000ULL / ms << " rec/s combined)\n";
+    std::cout << "[DualW2R/" << label << "] Reader1: " << rC
+              << " rec (" << rC * 1000ULL / ms << " rec/s)"
+              << ", read/written = "
+              << (wA + wB > 0 ? static_cast<double>(rC) / static_cast<double>(wA + wB) : 0.0) << "\n";
+    std::cout << "[DualW2R/" << label << "] Reader2: " << rD
+              << " rec (" << rD * 1000ULL / ms << " rec/s)"
+              << ", read/written = "
+              << (wA + wB > 0 ? static_cast<double>(rD) / static_cast<double>(wA + wB) : 0.0) << "\n";
+    std::cout << "[DualW2R/" << label << "] sink (ignore): "
+              << sinkC.load() << ", " << sinkD.load() << "\n";
+
+    EXPECT_GT(wA, 0u);
+    EXPECT_GT(wB, 0u);
+    EXPECT_GT(rC, 0u);
+    EXPECT_GT(rD, 0u);
+}
+
+// =============================================================================
+// Dual-writer / dual-reader test suite
+// =============================================================================
+
+class ZCDualWriterTest : public ::testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    AlignModes,
+    ZCDualWriterTest,
+    ::testing::Values(false, true),
+    [](const ::testing::TestParamInfo<bool>& info) {
+        return info.param ? "Aligned" : "Packed";
+    });
+
+// Two buffered writers + two buffered readers sharing one buffer.
+TEST_P(ZCDualWriterTest, DualWriter_Reader_Concurrent) {
+    const bool align = GetParam();
+    runDualWriterDualReader<RecordReader>(
+        align, align ? "Writer+Reader Aligned" : "Writer+Reader Packed");
+}
+
+// Two buffered writers + two zero-copy readers sharing one buffer.
+TEST_P(ZCDualWriterTest, DualWriter_ReaderZC_Concurrent) {
+    const bool align = GetParam();
+    runDualWriterDualReader<RecordReaderZC>(
+        align, align ? "Writer+ReaderZC Aligned" : "Writer+ReaderZC Packed");
+}
