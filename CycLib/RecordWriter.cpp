@@ -99,10 +99,8 @@ RecordWriter::RecordBatch RecordWriter::nextBatch(size_t maxRecords, bool wait) 
 }
 
 void RecordWriter::commitBatch(size_t count) {
-    if (m_currentIdx + count <= m_capacity) {
-        size_t available = m_capacity - m_currentIdx;
-        if (count > available) count = available;
-
+    size_t available = m_capacity - m_currentIdx;
+    if (count <= available) {
         for (size_t i = 0; i < count; ++i) {
             uint8_t* ptr = m_activeBuf->data() + ((m_currentIdx + i) * m_recSize);
             double &ts = *reinterpret_cast<double*>(ptr + m_timestampOffset);
@@ -115,10 +113,16 @@ void RecordWriter::commitBatch(size_t count) {
         LOG_DBG << "RecordWriter::commitBatch: committed " << count
                 << " records, bufferFill=" << m_currentIdx << "/" << m_capacity;
     } else {
-        // Safety fallback in case of incorrect count provided by the user
         LOG_WARN << "RecordWriter::commitBatch: count " << count
                  << " exceeds remaining capacity (idx=" << m_currentIdx
-                 << " cap=" << m_capacity << "), clamping to full";
+                 << " cap=" << m_capacity << "), clamping to " << available;
+        for (size_t i = 0; i < available; ++i) {
+            uint8_t* ptr = m_activeBuf->data() + ((m_currentIdx + i) * m_recSize);
+            double &ts = *reinterpret_cast<double*>(ptr + m_timestampOffset);
+            if (ts == 0.0) {
+                ts = get_current_epoch_time();
+            }
+        }
         m_currentIdx = m_capacity;
     }
 }
