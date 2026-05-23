@@ -1,6 +1,8 @@
 #include "TcpSessionWidget.h"
 #include <QVBoxLayout>
 #include <QString>
+#include <RecordReaderZC.h>
+#include <RecordWriterZC.h>
 
 TcpSessionWidget::TcpSessionWidget(const ConnectionConfig& config, QWidget *parent)
     : QWidget(parent), m_config(config)
@@ -31,7 +33,7 @@ void TcpSessionWidget::startConnection() {
     m_ruleTextCache.clear();
 
     if (!m_receiver) {
-        m_receiver = new cyc::TcpDataReceiver();
+        m_receiver = new cyc::TcpDataReceiver(cyc::UseWriter<cyc::RecordWriterZC>{});
     }
 
     emit statusChanged("Connecting...");
@@ -84,7 +86,7 @@ void TcpSessionWidget::tryConnect() {
 
             model->clearAll();
 
-            m_consumer = new ChartConsumer(buffer);
+            m_consumer = new ChartConsumer(cyc::UseReader<cyc::RecordReaderZC>{}, buffer);
 
             QObject::connect(m_consumer, &ChartConsumer::headerParsed, model,
                              [model](const QVector<CbfSeriesConfig>& configs) {

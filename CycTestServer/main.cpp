@@ -8,7 +8,7 @@
 #include "Core/RecRule.h"
 #include "Core/Record.h"
 #include "Core/PAttr.h"
-#include "RecordWriter.h"
+#include "RecordWriterZC.h"
 #include "Tcp/TcpServer.h"
 #include "Tcp/TcpServerManager.h"
 #include <asio.hpp>
@@ -50,7 +50,7 @@ int main() {
         // 2. Create Ring Buffer and Writer
         auto buffer = std::make_shared<RecBuffer>();
         buffer->init(rule, 10000);
-        RecordWriter writer;
+        RecordWriterZC writer;
         writer.init(buffer, 2000);
 
         int port = 5000;
