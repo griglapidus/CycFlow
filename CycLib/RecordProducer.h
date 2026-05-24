@@ -24,13 +24,13 @@ CYCLIB_SUPPRESS_C4251
  * ### Writer type selection
  * By default a RecordWriter (double-buffered, async) is created. To use a
  * different writer pass a UseWriter<T> tag as the first constructor argument,
- * or call init<WriterType>() before start():
+ * or call init() before start():
  * @code
  * // Via constructor
  * MyProducer producer(UseWriter<RecordWriterZC>{}, 10000, 100);
  *
  * // Via init (must be called before start())
- * producer.init<RecordWriterZC>(10000, 100);
+ * producer.init(UseWriter<RecordWriterZC>{}, 10000, 100);
  * @endcode
  *
  * @see BatchRecordProducer
@@ -56,23 +56,38 @@ public:
     RecordProducer(UseWriter<WriterType>, size_t bufferCapacity = 10000, size_t writerBatchSize = 100)
         : RecordProducer()
     {
-        init<WriterType>(bufferCapacity, writerBatchSize);
+        init(UseWriter<WriterType>{}, bufferCapacity, writerBatchSize);
     }
 
     virtual ~RecordProducer();
 
     /**
-     * @brief Configures the producer with the default RecordWriter.
+     * @brief Configures the producer with the default RecordWriter (double-buffered).
      *
      * Must be called before start() on default-constructed instances.
-     * Calling init() after the producer has been started is not supported.
-     *
-     * @tparam WriterType  Writer implementation to use. Defaults to RecordWriter.
      * @param bufferCapacity  Number of records the ring buffer can hold.
      * @param writerBatchSize Batch size for the internal writer.
      */
-    template<typename WriterType = RecordWriter>
     void init(size_t bufferCapacity = 10000, size_t writerBatchSize = 100) {
+        m_bufferCapacity  = bufferCapacity;
+        m_writerBatchSize = std::min(std::max(writerBatchSize, bufferCapacity / 20), bufferCapacity);
+        m_writerFactory   = [](std::shared_ptr<RecBuffer> buf, size_t batch) {
+            return std::make_unique<RecordWriter>(buf, batch, true);
+        };
+    }
+
+    /**
+     * @brief Configures the producer with an explicitly chosen writer type.
+     *
+     * @tparam WriterType  Writer implementation to use.
+     * @param bufferCapacity  Number of records the ring buffer can hold.
+     * @param writerBatchSize Batch size for the internal writer.
+     * @code
+     * producer.init(UseWriter<RecordWriterZC>{}, 10000, 100);
+     * @endcode
+     */
+    template<typename WriterType>
+    void init(UseWriter<WriterType>, size_t bufferCapacity = 10000, size_t writerBatchSize = 100) {
         m_bufferCapacity  = bufferCapacity;
         m_writerBatchSize = std::min(std::max(writerBatchSize, bufferCapacity / 20), bufferCapacity);
         m_writerFactory   = [](std::shared_ptr<RecBuffer> buf, size_t batch) {
@@ -151,7 +166,7 @@ protected:
     std::mutex        m_initMtx;
     std::atomic<bool> m_isInitialized{false};
 
-    /// Factory function set by init<WriterType>(). Called lazily by initialize().
+    /// Factory function set by init(). Called lazily by initialize().
     std::function<std::unique_ptr<RecordWriterBase>(std::shared_ptr<RecBuffer>, size_t)> m_writerFactory;
 };
 

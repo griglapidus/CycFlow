@@ -47,17 +47,15 @@ public:
               bool addTimestampSuffix = true)
         : CbfWriter()
     {
-        init<ReaderType>(filename, buffer, autoStart, batchSize, addTimestampSuffix);
+        init(UseReader<ReaderType>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
     }
 
     ~CbfWriter() override;
 
     /**
-     * @brief Initialises the writer. Must be called once on default-constructed instances.
+     * @brief Initialises the writer with the default RecordReader (double-buffered).
+     * Must be called once on default-constructed instances.
      *
-     * @tparam ReaderType          Any class derived from RecordReaderBase. Defaults to
-     *                             RecordReader (double-buffered); pass RecordReaderZC
-     *                             for zero-copy access.
      * @param filename             Output CBF path.
      * @param buffer               Shared pointer to the source RecBuffer.
      * @param autoStart            If @c true, starts the worker thread immediately.
@@ -66,12 +64,33 @@ public:
      *                             millisecond precision) is inserted before the
      *                             extension: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
      */
-    template<typename ReaderType = RecordReader>
     void init(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 1000,
               bool addTimestampSuffix = true) {
+        init(UseReader<RecordReader>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
+    }
+
+    /**
+     * @brief Initialises the writer with an explicitly chosen reader type.
+     *
+     * @tparam ReaderType          Any class derived from RecordReaderBase.
+     * @param filename             Output CBF path.
+     * @param buffer               Shared pointer to the source RecBuffer.
+     * @param autoStart            If @c true, starts the worker thread immediately.
+     * @param batchSize            Batch size for the internal reader.
+     * @param addTimestampSuffix   If @c true, the current local time (with
+     *                             millisecond precision) is inserted before the
+     *                             extension: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
+     * @code
+     * writer.init(UseReader<RecordReaderZC>{}, "out.cbf", buffer);
+     * @endcode
+     */
+    template<typename ReaderType>
+    void init(UseReader<ReaderType>, const std::string& filename, std::shared_ptr<RecBuffer> buffer,
+              bool autoStart = true, size_t batchSize = 1000,
+              bool addTimestampSuffix = true) {
         m_filename = addTimestampSuffix ? createSuffixedFilename(filename) : filename;
-        RecordConsumer::init<ReaderType>(buffer, batchSize);
+        RecordConsumer::init(UseReader<ReaderType>{}, buffer, batchSize);
         if (autoStart) start();
     }
 

@@ -17,10 +17,10 @@ CYCLIB_SUPPRESS_C4251
  *
  * Manages a RecordReaderBase-derived reader and a background worker thread.
  * By default init() creates a RecordReader (double-buffered). To use a
- * different reader type pass a pre-constructed instance to the second overload:
+ * different reader type pass a UseReader<T> tag:
  *
  * @code
- * consumer.init(std::make_unique<RecordReaderZC>(buffer, batchSize));
+ * consumer.init(UseReader<RecordReaderZC>{}, buffer, batchSize);
  * @endcode
  */
 class CYCLIB_EXPORT RecordConsumer {
@@ -40,25 +40,35 @@ public:
                    size_t readerBatchSize = 100)
         : RecordConsumer()
     {
-        init<ReaderType>(buffer, readerBatchSize);
+        init(UseReader<ReaderType>{}, buffer, readerBatchSize);
     }
 
     virtual ~RecordConsumer();
 
     /**
-     * @brief Initialises the consumer with the specified reader type.
-     *
-     * @tparam ReaderType  Any class derived from RecordReaderBase.
-     *                     Defaults to RecordReader (double-buffered).
-     *                     Pass RecordReaderZC for zero-copy access.
+     * @brief Initialises the consumer with the default RecordReader (double-buffered).
      *
      * @code
-     * consumer.init(buffer, batchSize);                     // RecordReader
-     * consumer.init<RecordReaderZC>(buffer, batchSize);     // RecordReaderZC
+     * consumer.init(buffer, batchSize);
      * @endcode
      */
-    template<typename ReaderType = RecordReader>
     void init(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100) {
+        readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20),
+                                   buffer->capacity());
+        m_reader = std::make_unique<RecordReader>(buffer, readerBatchSize);
+    }
+
+    /**
+     * @brief Initialises the consumer with an explicitly chosen reader type.
+     *
+     * @tparam ReaderType  Any class derived from RecordReaderBase.
+     *
+     * @code
+     * consumer.init(UseReader<RecordReaderZC>{}, buffer, batchSize);
+     * @endcode
+     */
+    template<typename ReaderType>
+    void init(UseReader<ReaderType>, std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize = 100) {
         readerBatchSize = std::min(std::max(readerBatchSize, buffer->capacity() / 20),
                                    buffer->capacity());
         m_reader = std::make_unique<ReaderType>(buffer, readerBatchSize);

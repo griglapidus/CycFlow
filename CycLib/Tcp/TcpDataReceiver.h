@@ -40,7 +40,7 @@ public:
         : m_socket(m_ioContext)
         , m_connected(false)
     {
-        init<WriterType>(bufferCapacity, writerBatchSize);
+        init(UseWriter<WriterType>{}, bufferCapacity, writerBatchSize);
     }
     ~TcpDataReceiver() override;
 

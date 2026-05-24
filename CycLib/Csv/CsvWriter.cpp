@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <ctime>
 #include <sstream>
+#include <RecordReaderZC.h>
 
 namespace cyc {
 

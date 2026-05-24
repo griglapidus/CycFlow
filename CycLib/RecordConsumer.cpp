@@ -13,7 +13,7 @@ RecordConsumer::RecordConsumer()
 RecordConsumer::RecordConsumer(std::shared_ptr<RecBuffer> buffer, size_t readerBatchSize)
     : RecordConsumer()
 {
-    init<RecordReader>(buffer, readerBatchSize);
+    init(buffer, readerBatchSize);
 }
 
 

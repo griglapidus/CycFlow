@@ -43,7 +43,7 @@ public:
         , m_valid(false)
         , m_dataBytesRemaining(0)
     {
-        init<WriterType>(bufferCapacity, writerBatchSize);
+        init(UseWriter<WriterType>{}, bufferCapacity, writerBatchSize);
         if (autoStart) start();
     }
 

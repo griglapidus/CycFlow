@@ -6,7 +6,7 @@
 namespace cyc {
 
 RecordProducer::RecordProducer(size_t bufferCapacity, size_t writerBatchSize) {
-    init<RecordWriter>(bufferCapacity, writerBatchSize);
+    init(bufferCapacity, writerBatchSize);
 }
 
 RecordProducer::~RecordProducer() {

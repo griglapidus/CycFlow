@@ -34,7 +34,7 @@ public:
                   size_t readerBatchSize, asio::ip::tcp::socket socket)
         : m_socket(std::move(socket))
     {
-        init<ReaderType>(buffer, readerBatchSize);
+        init(UseReader<ReaderType>{}, buffer, readerBatchSize);
     }
     ~TcpDataSender() override;
 
