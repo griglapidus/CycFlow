@@ -151,7 +151,7 @@ protected:
         RecRule rule(attrs);
 
         auto buffer = std::make_shared<RecBuffer>(rule, 1000);
-        CbfWriter fileWriter(testFileName, buffer, true);
+        CbfWriter fileWriter(testFileName, buffer, true, 1000, false);
         fileWriter.setAlias("TestGen");
 
         RecordWriter sourceWriter(buffer, 100);
@@ -227,7 +227,7 @@ TEST_F(CbfReaderTest, ReadEmptyDataSection) {
         std::vector<PAttr> attrs = {{"Val", DataType::dtInt32}};
         RecRule rule(attrs);
         auto buffer = std::make_shared<RecBuffer>(rule, 100);
-        CbfWriter writer(testFileName, buffer, true);
+        CbfWriter writer(testFileName, buffer, true, 1000, false);
         writer.finish(); // Write header only, no data
     }
 
@@ -266,7 +266,7 @@ TEST_F(CbfWriterIntegrationTest, ProducerConsumerCycle) {
     auto buffer = std::make_shared<RecBuffer>(rule, bufferCapacity);
 
     cyc::RecordWriter producer(buffer, 100);
-    cyc::CbfWriter consumer(testFileName, buffer, true, 100);
+    cyc::CbfWriter consumer(testFileName, buffer, true, 100, false);
     std::string alias = "IntgrTest";
     consumer.setAlias(alias);
 

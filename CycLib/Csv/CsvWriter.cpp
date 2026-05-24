@@ -3,6 +3,7 @@
 
 #include "CsvWriter.h"
 #include "Core/RecRule.h"
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <ctime>
@@ -10,17 +11,13 @@
 
 namespace cyc {
 
-CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
-                     bool autoStart, size_t batchSize)
-    : BatchRecordConsumer(buffer, batchSize)
-    , m_filename(filename)
-    , m_delimiter(",")
-{
-    m_cachedAttrs = getReader().getRule().getAttributes();
+CsvWriter::CsvWriter() = default;
 
-    if (autoStart) {
-        start();
-    }
+CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
+                     bool autoStart, size_t batchSize, bool addTimestampSuffix)
+    : CsvWriter()
+{
+    init(filename, buffer, autoStart, batchSize, addTimestampSuffix);
 }
 
 CsvWriter::~CsvWriter() {
@@ -66,27 +63,35 @@ void CsvWriter::writeValue(const Record& rec, const PAttr& attr) {
     void* ptr = rec.getVoid(attr.id);
     if (!ptr) return;
 
-    switch (attr.type) {
-    case DataType::dtBool:   m_file << (*static_cast<bool*>(ptr) ? "1" : "0"); break;
-    case DataType::dtChar:
-        if (attr.count > 1) {
-            m_file << "\"" << static_cast<char*>(ptr) << "\"";
-        } else {
-            m_file << *static_cast<char*>(ptr);
+    // dtChar with count > 1 is a fixed-size string, emitted as a single quoted column.
+    if (attr.type == DataType::dtChar && attr.count > 1) {
+        m_file << "\"" << static_cast<char*>(ptr) << "\"";
+        return;
+    }
+
+    const size_t elemSize = getTypeSize(attr.type);
+    const size_t n        = attr.count > 0 ? attr.count : 1;
+    auto*        base     = static_cast<uint8_t*>(ptr);
+
+    for (size_t i = 0; i < n; ++i) {
+        if (i > 0) m_file << m_delimiter;
+        void* p = base + i * elemSize;
+        switch (attr.type) {
+        case DataType::dtBool:   m_file << (*static_cast<bool*>(p) ? "1" : "0"); break;
+        case DataType::dtChar:   m_file << *static_cast<char*>(p); break;
+        case DataType::dtInt8:   m_file << static_cast<int>(*static_cast<int8_t*>(p)); break;
+        case DataType::dtUInt8:  m_file << static_cast<unsigned int>(*static_cast<uint8_t*>(p)); break;
+        case DataType::dtInt16:  m_file << *static_cast<int16_t*>(p); break;
+        case DataType::dtUInt16: m_file << *static_cast<uint16_t*>(p); break;
+        case DataType::dtInt32:  m_file << *static_cast<int32_t*>(p); break;
+        case DataType::dtUInt32: m_file << *static_cast<uint32_t*>(p); break;
+        case DataType::dtInt64:  m_file << *static_cast<int64_t*>(p); break;
+        case DataType::dtUInt64: m_file << *static_cast<uint64_t*>(p); break;
+        case DataType::dtFloat:  m_file << *static_cast<float*>(p); break;
+        case DataType::dtDouble: m_file << *static_cast<double*>(p); break;
+        case DataType::dtPtr:    m_file << reinterpret_cast<uintptr_t>(*static_cast<void**>(p)); break;
+        default: break;
         }
-        break;
-    case DataType::dtInt8:   m_file << static_cast<int>(*static_cast<int8_t*>(ptr)); break;
-    case DataType::dtUInt8:  m_file << static_cast<unsigned int>(*static_cast<uint8_t*>(ptr)); break;
-    case DataType::dtInt16:  m_file << *static_cast<int16_t*>(ptr); break;
-    case DataType::dtUInt16: m_file << *static_cast<uint16_t*>(ptr); break;
-    case DataType::dtInt32:  m_file << *static_cast<int32_t*>(ptr); break;
-    case DataType::dtUInt32: m_file << *static_cast<uint32_t*>(ptr); break;
-    case DataType::dtInt64:  m_file << *static_cast<int64_t*>(ptr); break;
-    case DataType::dtUInt64: m_file << *static_cast<uint64_t*>(ptr); break;
-    case DataType::dtFloat:  m_file << *static_cast<float*>(ptr); break;
-    case DataType::dtDouble: m_file << *static_cast<double*>(ptr); break;
-    case DataType::dtPtr:    m_file << reinterpret_cast<uintptr_t>(*static_cast<void**>(ptr)); break;
-    default: break;
     }
 }
 
@@ -127,32 +132,46 @@ void CsvWriter::setupFile() {
 
 std::string CsvWriter::generateHeader() const {
     std::stringstream ss;
-    for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
-        ss << m_cachedAttrs[i].name;
-        if (i < m_cachedAttrs.size() - 1) {
-            ss << m_delimiter;
+    bool first = true;
+    for (const auto& attr : m_cachedAttrs) {
+        // dtChar with count > 1 collapses to one column (a quoted string).
+        const bool   isString = (attr.type == DataType::dtChar && attr.count > 1);
+        const size_t n        = isString ? 1 : (attr.count > 0 ? attr.count : 1);
+        for (size_t i = 0; i < n; ++i) {
+            if (!first) ss << m_delimiter;
+            first = false;
+            ss << attr.name;
+            if (n > 1) ss << '(' << i << ')';
         }
     }
     return ss.str();
 }
 
 std::string CsvWriter::createSuffixedFilename(const std::string &originalName) const {
-    std::time_t now = std::time(nullptr);
+    using namespace std::chrono;
+    const auto now = system_clock::now();
+    const auto t   = system_clock::to_time_t(now);
+    const auto ms  = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
     std::tm buf;
 #if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&buf, &now);
+    localtime_s(&buf, &t);
 #else
-    localtime_r(&now, &buf);
+    localtime_r(&t, &buf);
 #endif
 
     char timeStr[32];
-    std::strftime(timeStr, sizeof(timeStr), "_%Y%m%d_%H%M%S", &buf);
+    std::strftime(timeStr, sizeof(timeStr), "_%Y-%m-%d_%H-%M-%S", &buf);
+
+    std::ostringstream ss;
+    ss << timeStr << '-' << std::setw(3) << std::setfill('0') << ms.count();
+    const std::string suffix = ss.str();
 
     size_t dotPos = originalName.find_last_of('.');
     if (dotPos != std::string::npos && dotPos > 0) {
-        return originalName.substr(0, dotPos) + timeStr + originalName.substr(dotPos);
+        return originalName.substr(0, dotPos) + suffix + originalName.substr(dotPos);
     }
-    return originalName + timeStr;
+    return originalName + suffix;
 }
 
 } // namespace cyc

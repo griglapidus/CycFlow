@@ -21,10 +21,17 @@ CYCLIB_SUPPRESS_C4251
 class CYCLIB_EXPORT CsvWriter : public BatchRecordConsumer {
 public:
     /**
+     * @brief Default constructor. Leaves the writer uninitialised.
+     * Call init() before using the writer.
+     */
+    CsvWriter();
+
+    /**
      * @brief Constructs the CSV writer with the default RecordReader (double-buffered).
      */
     CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
-              bool autoStart = true, size_t batchSize = 100);
+              bool autoStart = true, size_t batchSize = 100,
+              bool addTimestampSuffix = true);
 
     /**
      * @brief Constructs the CSV writer with an explicitly chosen reader type.
@@ -35,19 +42,41 @@ public:
     template<typename ReaderType>
     CsvWriter(UseReader<ReaderType>, const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
-              bool autoStart = true, size_t batchSize = 100)
-        : m_filename(filename)
-        , m_delimiter(",")
+              bool autoStart = true, size_t batchSize = 100,
+              bool addTimestampSuffix = true)
+        : CsvWriter()
     {
-        init<ReaderType>(buffer, batchSize);
-        m_cachedAttrs = getReader().getRule().getAttributes();
-        if (autoStart) start();
+        init<ReaderType>(filename, buffer, autoStart, batchSize, addTimestampSuffix);
     }
 
     /**
      * @brief Destructor. Ensures the thread is stopped and the file is closed.
      */
     ~CsvWriter() override;
+
+    /**
+     * @brief Initialises the writer. Must be called once on default-constructed instances.
+     *
+     * @tparam ReaderType          Any class derived from RecordReaderBase. Defaults to
+     *                             RecordReader (double-buffered); pass RecordReaderZC
+     *                             for zero-copy access.
+     * @param filename             Output CSV path.
+     * @param buffer               Shared pointer to the source RecBuffer.
+     * @param autoStart            If @c true, starts the worker thread immediately.
+     * @param batchSize            Batch size for the internal reader.
+     * @param addTimestampSuffix   If @c true, the current local time (with
+     *                             millisecond precision) is inserted before the
+     *                             extension: @c "Foo.csv" → @c "Foo_2026-05-03_19-51-15-022.csv".
+     */
+    template<typename ReaderType = RecordReader>
+    void init(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
+              bool autoStart = true, size_t batchSize = 100,
+              bool addTimestampSuffix = true) {
+        m_filename = addTimestampSuffix ? createSuffixedFilename(filename) : filename;
+        RecordConsumer::init<ReaderType>(buffer, batchSize);
+        m_cachedAttrs = getReader().getRule().getAttributes();
+        if (autoStart) start();
+    }
 
 protected:
     /**
@@ -96,7 +125,7 @@ private:
 
 private:
     std::string m_filename;
-    std::string m_delimiter;
+    std::string m_delimiter = ",";
     std::ofstream m_file;
     std::vector<PAttr> m_cachedAttrs;
 };

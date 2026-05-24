@@ -69,7 +69,7 @@ TEST_F(CsvWriterTest, CreatesFileWithHeader) {
     auto buffer = std::make_shared<RecBuffer>(rule, 100);
 
     {
-        CsvWriter writer(filename, buffer);
+        CsvWriter writer(filename, buffer, true, 100, false);
     }
 
     auto lines = readLines(filename);
@@ -93,7 +93,7 @@ TEST_F(CsvWriterTest, WritesFormattedData) {
     auto r2 = createRawRecord(rule, 20, 0.005, "TestB");
     rawBatch.insert(rawBatch.end(), r2.begin(), r2.end());
 
-    CsvWriter writer(filename, buffer);
+    CsvWriter writer(filename, buffer, true, 100, false);
     buffer->push(rawBatch.data(), 2);
 
     writer.finish();
@@ -117,7 +117,7 @@ TEST_F(CsvWriterTest, AppendsToExistingFile) {
     RecRule rule(attrs);
     auto buffer = std::make_shared<RecBuffer>(rule, 100);
 
-    CsvWriter writer(filename, buffer);
+    CsvWriter writer(filename, buffer, true, 100, false);
     auto raw = createRawRecord(rule, 2, 2.2, "");
     buffer->push(raw.data(), 1);
 
@@ -133,7 +133,7 @@ TEST_F(CsvWriterTest, HandlesManyRecords) {
     RecRule rule(attrs);
     auto buffer = std::make_shared<RecBuffer>(rule, 5000);
 
-    CsvWriter writer(filename, buffer);
+    CsvWriter writer(filename, buffer, true, 100, false);
     const int COUNT = 1000;
     std::vector<uint8_t> hugeBatch;
     hugeBatch.reserve(COUNT * rule.getRecSize());
@@ -162,7 +162,7 @@ TEST_P(CsvWriterTest, LongRunningProducerConsumer) {
 
     // Writer strictly blocks on full buffer to prevent data loss
     cyc::RecordWriter writer(buffer, 100, true);
-    cyc::CsvWriter csvWriter(filename, buffer, true, 100);
+    cyc::CsvWriter csvWriter(filename, buffer, true, 100, false);
 
     const int totalRecords = 5000;
 
