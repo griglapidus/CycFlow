@@ -52,7 +52,6 @@ The **CycLib** core library is built around thread safety, zero-copy data paths,
 
 * **File I/O & Serialization:** [CbfWriter](CycLib/Cbf/CbfWriter.h) / [CbfReader](CycLib/Cbf/CbfReader.h) for the Cyc Binary Format and [CsvWriter](CycLib/Csv/CsvWriter.h) for CSV. Both operate via background batching.
 * **Networking:** Built on `asio`. [TcpServer](CycLib/Tcp/TcpServer.h) registers buffers under a name (with configurable batch size) and spawns [TcpDataSender](CycLib/Tcp/TcpDataSender.h) sessions; [TcpDataReceiver](CycLib/Tcp/TcpDataReceiver.h) connects, negotiates the `RecRule` schema, and streams records into a local buffer. [TcpServerManager](CycLib/Tcp/TcpServerManager.h) is a singleton that owns one `io_context` + `TcpServer` for the whole process. `unregisterBuffer()` closes the matching sessions when a buffer goes away.
-* **Default constructor + `init()`:** `RecBuffer`, `RecordWriter[ZC]`, `RecordReader[ZC]`, `RecordConsumer`, and `RecordProducer` all support default construction followed by `init()`, so they can be embedded as members and initialised later.
 
 ---
 
@@ -77,9 +76,6 @@ An offline viewer for `.cbf` files.
 * Supports OS-level file associations.
 * Overlay of multiple graphs and batch data updates for fast loading of long sessions.
 * Shares the same `ChartWidget` rendering and navigation as `CycBufReceiver`.
-
-### CycTestServer
-A console data generator that publishes a multi-channel sensor schema (counter array, named bit register, float / int / double sensor values) on TCP port 5000 via the singleton `TcpServerManager`. Use it together with `CycBufReceiver` to exercise the full pipeline.
 
 ---
 
@@ -111,7 +107,7 @@ Build artifacts are placed under `build/<Compiler>_<Arch>/{bin,lib,include}/<Con
 * `-DCYCLIB_COPY_ASIO_HEADERS=ON` *(default)* — copy fetched asio headers to the install/header destination so downstream consumers can `#include <asio.hpp>` without re-fetching.
 
 ### Using CycLib in another CMake project
-`CycLib` can be embedded via `add_subdirectory` or consumed from an install tree via `find_package(CycStruct)` — it exports the `CycStruct::CycLib` target.
+`CycLib` can be embedded via `add_subdirectory` or consumed from an install tree via `find_package(CycFlow)` — it exports the `CycFlow::CycLib` target.
 
 ---
 

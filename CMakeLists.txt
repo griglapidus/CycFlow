@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(CycStruct LANGUAGES CXX)
+project(CycFlow LANGUAGES CXX)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(CYCSTRUCT_MASTER_PROJECT ON)
+    set(CYCFLOW_MASTER_PROJECT ON)
 else()
-    set(CYCSTRUCT_MASTER_PROJECT OFF)
+    set(CYCFLOW_MASTER_PROJECT OFF)
 endif()
 
 if(NOT TARGET asio::asio)
@@ -27,7 +27,7 @@ if(NOT TARGET asio::asio)
     add_library(asio::asio ALIAS asio_lib)
 endif()
 
-if(CYCSTRUCT_MASTER_PROJECT)
+if(CYCFLOW_MASTER_PROJECT)
     find_package(Qt6 COMPONENTS Widgets QUIET)
     if(Qt6_FOUND)
         message(STATUS "Qt6 found. Qt-based projects are enabled.")
@@ -64,7 +64,7 @@ endif()
 
 add_subdirectory(CycLib)
 
-if(CYCSTRUCT_MASTER_PROJECT)
+if(CYCFLOW_MASTER_PROJECT)
     if(QT_PROJECTS_ENABLED)
         add_subdirectory(CbfView)
         add_subdirectory(CycBufReceiver)

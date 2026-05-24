@@ -67,7 +67,7 @@ add_library(CycLib ${SOURCES} ${HEADERS}
     Core/CycLogger.cpp
     Core/CycLogger.h)
 
-add_library(CycStruct::CycLib ALIAS CycLib)
+add_library(CycFlow::CycLib ALIAS CycLib)
 
 target_compile_features(CycLib PUBLIC cxx_std_17)
 
@@ -133,47 +133,51 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-if(TARGET asio_lib)
-    install(TARGETS CycLib asio_lib
-        EXPORT CycStructTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+option(CYCFLOW_INSTALL "Enable CycFlow install rules" ${CYCFLOW_MASTER_PROJECT})
+
+if(CYCFLOW_INSTALL)
+    if(TARGET asio_lib)
+        install(TARGETS CycLib asio_lib
+            EXPORT CycFlowTargets
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+        install(DIRECTORY "${asio_SOURCE_DIR}/asio/include/"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        )
+    else()
+        install(TARGETS CycLib
+            EXPORT CycFlowTargets
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+
+    install(EXPORT CycFlowTargets
+        FILE CycFlowTargets.cmake
+        NAMESPACE CycFlow::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycFlow
     )
-    install(DIRECTORY "${asio_SOURCE_DIR}/asio/include/"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CycFlowConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/CycFlowConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycFlow
     )
-else()
-    install(TARGETS CycLib
-        EXPORT CycStructTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/CycFlowConfig.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycFlow
     )
+
+    foreach(HEADER IN LISTS HEADERS)
+        get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/${HEADER}"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Cyc/${HEADER_DIR}"
+        )
+    endforeach()
 endif()
-
-install(EXPORT CycStructTargets
-    FILE CycStructTargets.cmake
-    NAMESPACE CycStruct::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycStruct
-)
-
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CycStructConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/CycStructConfig.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycStruct
-)
-
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/CycStructConfig.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CycStruct
-)
-
-foreach(HEADER IN LISTS HEADERS)
-    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/${HEADER}"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Cyc/${HEADER_DIR}"
-    )
-endforeach()
 
 set_target_properties(CycLib PROPERTIES OUTPUT_NAME "Cyc")
 set_target_properties(CycLib PROPERTIES DEBUG_POSTFIX "_d")
