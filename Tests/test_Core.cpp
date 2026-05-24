@@ -602,13 +602,13 @@ TEST_P(RecordPerformanceTest, FieldReadWriteThroughput) {
             sink += rec.getUInt8 (idU8);
             sink += rec.getInt16(idI16);
             sink += rec.getInt32(idI32);
+            sink += rec.getUInt32(idU32, 0);
             sink += rec.getUInt32(idU32, 1);
-            sink += rec.getUInt32(idU32, 2);
             sink += rec.getInt64(idI64);
-            sink += static_cast<int64_t>(rec.getFloat (idFlt),1);
-            sink += static_cast<int64_t>(rec.getFloat (idFlt),2);
-            sink += static_cast<int64_t>(rec.getDouble(idDbl),1);
-            sink += static_cast<int64_t>(rec.getDouble(idDbl),2);
+            sink += static_cast<int64_t>(rec.getFloat (idFlt, 0));
+            sink += static_cast<int64_t>(rec.getFloat (idFlt, 1));
+            sink += static_cast<int64_t>(rec.getDouble(idDbl, 0));
+            sink += static_cast<int64_t>(rec.getDouble(idDbl, 1));
         }
         readElapsed += clock::now() - readBegin;
 
@@ -728,13 +728,13 @@ TEST_P(RecordPerformanceTest, ConcurrentFieldReadWriteThroughput) {
                 sink += rec.getUInt8 (idU8);
                 sink += rec.getInt16 (idI16);
                 sink += rec.getInt32 (idI32);
+                sink += rec.getUInt32(idU32, 0);
                 sink += rec.getUInt32(idU32, 1);
-                sink += rec.getUInt32(idU32, 2);
                 sink += rec.getInt64 (idI64);
-                sink += static_cast<int64_t>(rec.getFloat (idFlt), 1);
-                sink += static_cast<int64_t>(rec.getFloat (idFlt), 2);
-                sink += static_cast<int64_t>(rec.getDouble(idDbl), 1);
-                sink += static_cast<int64_t>(rec.getDouble(idDbl), 2);
+                sink += static_cast<int64_t>(rec.getFloat (idFlt, 0));
+                sink += static_cast<int64_t>(rec.getFloat (idFlt, 1));
+                sink += static_cast<int64_t>(rec.getDouble(idDbl, 0));
+                sink += static_cast<int64_t>(rec.getDouble(idDbl, 1));
             }
             readCounter += batch.count;
         }
