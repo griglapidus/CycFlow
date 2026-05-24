@@ -58,7 +58,7 @@ private:
 
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-    setWindowTitle("CycLib MDI Streaming Viewer");
+    setWindowTitle("CycBuffer Stream Viewer");
     resize(1400, 900);
     setupUi();
 
