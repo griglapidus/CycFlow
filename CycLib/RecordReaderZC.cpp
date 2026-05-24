@@ -109,7 +109,25 @@ RecordReaderZC::RecordBatch RecordReaderZC::nextBatch(size_t maxRecords, bool wa
     const uint8_t* ptr = m_target->getBatchPtrFromGlobal(cursor, maxRecords, contiguous);
 
     if (!ptr || contiguous == 0) {
-        return {nullptr, 0, m_rule, m_recSize};
+        // Check for overrun: writer (blockOnFull=false) may have advanced past our cursor
+        // by more than the buffer capacity, making the cursor stale.
+        auto [tw, bs] = m_target->getTotalWrittenAndSize();
+        if (bs > 0 && tw > cursor && (tw - cursor) > bs) {
+            const uint64_t newCursor = tw - bs;
+            m_readerCursor.store(newCursor, std::memory_order_release);
+            // Keep the invariant pinnedEnd == readerCursor (nothing is pinned yet) so
+            // that the next release() call does not revert the cursor back to the
+            // stale pinnedEnd value.
+            m_pinnedEnd = newCursor;
+            m_target->notifyWriters();
+            LOG_WARN << "RecordReaderZC::nextBatch: overrun, skipped "
+                     << (newCursor - cursor) << " records to cursor=" << newCursor;
+            ptr = m_target->getBatchPtrFromGlobal(newCursor, maxRecords, contiguous);
+            cursor = newCursor;
+        }
+        if (!ptr || contiguous == 0) {
+            return {nullptr, 0, m_rule, m_recSize};
+        }
     }
 
     m_pinnedEnd = cursor + contiguous;

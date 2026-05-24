@@ -859,3 +859,165 @@ TEST(RecRuleTest, PackedLayoutUnchanged) {
     EXPECT_EQ(rule.getOffsetById(PReg::getID("PK_Dbl")), header + 5u);
     EXPECT_EQ(rule.getRecSize(), header + 1u + 4u + 8u);
 }
+
+// =============================================================================
+// Overrun tests (blockOnFull = false)
+//
+// Verify that readers survive the situation where a non-blocking writer
+// advances more than one full buffer capacity ahead of a registered reader.
+// =============================================================================
+
+// RecordReader internally detects lag > bufferCapacity and skips its cursor
+// to the oldest available record.  The test writes 20× the buffer capacity from
+// a background thread while the consumer reads concurrently with wait=false.
+// Correctness properties checked:
+//   - Reader produces at least bufCap valid records within a time budget.
+//   - All received values are within [0, total).
+//   - Consecutive records are monotonically increasing (no corruption).
+TEST(OverrunTest, RecordReader_NonBlockingWriter_RecoverAfterOverrun) {
+    const int    idVal    = PReg::getID("OvrRR_v");
+    RecRule      rule({ PAttr("OvrRR_v", DataType::dtInt32) });
+
+    const size_t bufCap   = 10;
+    const size_t batchCap = 5;
+    const int    total    = 200;
+
+    auto buf = std::make_shared<RecBuffer>(rule, bufCap);
+    RecordWriter writer(buf, batchCap, /*blockOnFull=*/false);
+    RecordReader reader(buf, batchCap);
+
+    std::thread producerThread([&] {
+        for (int i = 0; i < total; ++i) {
+            Record r = writer.nextRecord();
+            r.setInt32(idVal, i);
+            writer.commitRecord();
+        }
+        writer.flush();
+    });
+
+    std::vector<int> received;
+    received.reserve(static_cast<size_t>(total));
+
+    using clock = std::chrono::steady_clock;
+    const auto deadline = clock::now() + std::chrono::seconds(10);
+
+    // Spin until we have collected at least bufCap records or timeout expires.
+    while (static_cast<int>(received.size()) < static_cast<int>(bufCap)
+           && clock::now() < deadline) {
+        auto batch = reader.nextBatch(batchCap, /*wait=*/false);
+        if (!batch.isValid()) {
+            std::this_thread::yield();
+            continue;
+        }
+        for (size_t i = 0; i < batch.count; ++i) {
+            Record rec(batch.rule, const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+            received.push_back(rec.getInt32(idVal));
+        }
+    }
+
+    producerThread.join();
+    reader.stop();
+
+    ASSERT_GE(static_cast<int>(received.size()), static_cast<int>(bufCap))
+        << "RecordReader did not produce " << bufCap
+        << " records within timeout — possible hang after overrun";
+
+    for (int v : received) {
+        EXPECT_GE(v, 0)     << "record value below valid range";
+        EXPECT_LT(v, total) << "record value above valid range";
+    }
+    for (size_t i = 1; i < received.size(); ++i) {
+        EXPECT_EQ(received[i], received[i - 1] + 1)
+            << "non-consecutive records at index " << i
+            << " (prev=" << received[i - 1] << " curr=" << received[i] << ")";
+    }
+}
+
+// Same scenario but the writer keeps running while the reader is reading.
+// The reader may be overrun multiple times; each time it must recover and
+// return internally-consecutive (gap-free) batches of valid data.
+//
+// Correctness invariants checked per batch:
+//   - All values in [0, INT_MAX).
+//   - Values within each batch are consecutive (no corruption / torn reads).
+// Global invariants:
+//   - At least one full buffer window of records is received.
+//   - Test completes within the time budget (no hang).
+TEST(OverrunTest, RecordReader_ConcurrentWriter_RepeatedOverrunRecovery) {
+    const int    idVal    = PReg::getID("OvrRRConc_v");
+    RecRule      rule({ PAttr("OvrRRConc_v", DataType::dtInt32) });
+
+    const size_t bufCap   = 10;
+    const size_t batchCap = 5;
+
+    auto buf = std::make_shared<RecBuffer>(rule, bufCap);
+    RecordWriter writer(buf, batchCap, /*blockOnFull=*/false);
+    RecordReader reader(buf, batchCap);
+
+    using clock = std::chrono::steady_clock;
+    const auto runDuration = std::chrono::milliseconds(500);
+
+    std::atomic<bool>    stopFlag{false};
+    std::atomic<int64_t> writtenCount{0};
+
+    // Writer: runs at full speed for runDuration, then stops.
+    std::thread producerThread([&] {
+        int64_t counter = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            Record r = writer.nextRecord();
+            r.setInt32(idVal, static_cast<int32_t>(counter & 0x7fffffff));
+            writer.commitRecord();
+            ++counter;
+        }
+        writer.flush();
+        writtenCount.store(counter);
+    });
+
+    // Let the writer run ahead so the reader is guaranteed to start overrun.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Consumer: reads until the stop flag fires.
+    size_t batchesReceived = 0;
+    size_t recordsReceived = 0;
+    bool   dataValid       = true;
+
+    const auto consumerDeadline = clock::now() + runDuration;
+    while (clock::now() < consumerDeadline) {
+        auto batch = reader.nextBatch(batchCap, /*wait=*/false);
+        if (!batch.isValid()) {
+            std::this_thread::yield();
+            continue;
+        }
+
+        ++batchesReceived;
+        int prev = -1;
+        for (size_t i = 0; i < batch.count; ++i) {
+            Record rec(batch.rule, const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+            int v = rec.getInt32(idVal);
+            if (v < 0) {
+                dataValid = false;
+            }
+            if (prev >= 0 && v != prev + 1) {
+                // Gap within a batch → data was torn / corrupted
+                dataValid = false;
+            }
+            prev = v;
+        }
+        recordsReceived += batch.count;
+    }
+
+    stopFlag.store(true, std::memory_order_relaxed);
+    producerThread.join();
+    reader.stop();
+
+    const int64_t written = writtenCount.load();
+    std::cout << "[OverrunConcRR] written=" << written
+              << " received=" << recordsReceived
+              << " batches=" << batchesReceived << "\n";
+
+    EXPECT_GT(written, 0);
+    ASSERT_GE(recordsReceived, bufCap)
+        << "RecordReader received no records under concurrent overrun";
+    EXPECT_TRUE(dataValid)
+        << "RecordReader returned corrupted / non-consecutive data within a batch";
+}

@@ -837,3 +837,195 @@ TEST_P(ZCDualWriterTest, DualWriter_ReaderZC_Concurrent) {
     runDualWriterDualReader<RecordReaderZC>(
         align, align ? "Writer+ReaderZC Aligned" : "Writer+ReaderZC Packed");
 }
+
+// =============================================================================
+// Overrun test — RecordReaderZC with blockOnFull = false
+//
+// RecordReaderZC has no background thread: its cursor only advances when
+// nextBatch() is called.  If a non-blocking writer advances more than one
+// full buffer capacity ahead of the ZC reader before the reader calls
+// nextBatch(), the cursor becomes stale.
+//
+// Previously, getBatchPtrFromGlobal() returned nullptr for a stale cursor
+// and nextBatch() passed that back to the caller WITHOUT updating the cursor,
+// causing an infinite loop of invalid batches.
+//
+// After the fix, nextBatch() detects lag > bufferCapacity, skips the cursor
+// forward to the oldest available record, and returns valid data.
+//
+// Test structure (deterministic — no races):
+//   1. Register RecordReaderZC (cursor = 0, buffer empty).
+//   2. Write total (= 10 × bufCap) records WITHOUT calling nextBatch.
+//      The writer flushes everything to RecBuffer before we read.
+//      Because blockOnFull=false the writer never waits for the reader.
+//   3. Call nextBatch — cursor is now total - bufCap records behind.
+//   4. Assert the reader returns the oldest available records and
+//      reads the full buffer window consecutively without hanging.
+// =============================================================================
+TEST(OverrunTest, RecordReaderZC_NonBlockingWriter_RecoverAfterOverrun) {
+    const int    idVal    = PReg::getID("OvrZC_v");
+    RecRule      rule({ PAttr("OvrZC_v", DataType::dtInt32) });
+
+    const size_t bufCap   = 10;
+    const size_t batchCap = 5;
+    const int    total    = 100; // 10× bufCap — guarantees overrun
+
+    auto buf = std::make_shared<RecBuffer>(rule, bufCap);
+    RecordWriter   writer(buf, batchCap, /*blockOnFull=*/false);
+    RecordReaderZC reader(buf, batchCap); // cursor = 0, buffer empty
+
+    // Write all records without consuming.  After flush():
+    //   totalWritten = total, bufferSize = bufCap,
+    //   reader cursor = 0, lag = total > bufCap  →  OVERRUN.
+    for (int i = 0; i < total; ++i) {
+        Record r = writer.nextRecord();
+        r.setInt32(idVal, i);
+        writer.commitRecord();
+    }
+    writer.flush();
+
+    // Read the full buffer window.  Each nextBatch call returns at most
+    // batchCap records; we loop until we have bufCap or the deadline passes.
+    std::vector<int> received;
+    received.reserve(bufCap);
+
+    using clock = std::chrono::steady_clock;
+    const auto deadline = clock::now() + std::chrono::seconds(5);
+
+    while (static_cast<int>(received.size()) < static_cast<int>(bufCap)
+           && clock::now() < deadline) {
+        auto batch = reader.nextBatch(batchCap, /*wait=*/false);
+        if (!batch.isValid()) {
+            std::this_thread::yield();
+            continue;
+        }
+        for (size_t i = 0; i < batch.count; ++i) {
+            Record rec(batch.rule, const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+            received.push_back(rec.getInt32(idVal));
+        }
+    }
+
+    reader.stop();
+
+    ASSERT_EQ(static_cast<int>(received.size()), static_cast<int>(bufCap))
+        << "RecordReaderZC did not recover from overrun within timeout — "
+           "check for infinite-invalid-batch loop in nextBatch()";
+
+    // After overrun recovery the first record must be the oldest in the buffer.
+    const int expectedFirst = total - static_cast<int>(bufCap);
+    EXPECT_EQ(received.front(), expectedFirst)
+        << "reader should start at oldest available record after overrun skip";
+
+    // All records must be consecutive (no corruption).
+    for (size_t i = 1; i < received.size(); ++i) {
+        EXPECT_EQ(received[i], received[i - 1] + 1)
+            << "non-consecutive records at index " << i
+            << " (prev=" << received[i - 1] << " curr=" << received[i] << ")";
+    }
+}
+
+// =============================================================================
+// Concurrent-writer overrun stress test for RecordReaderZC
+//
+// Unlike the static test above, the writer keeps running while the reader
+// tries to catch up.  This exercises two extra hazards:
+//
+//   1. TOCTOU race in the fix: between getTotalWrittenAndSize() and the retry
+//      getBatchPtrFromGlobal(), the writer may advance further.  If the retry
+//      fails, the next call must NOT regress the cursor backwards (the
+//      m_pinnedEnd fix prevents release() from reverting the adjusted cursor).
+//
+//   2. Repeated overruns: if the writer is much faster, the reader may be
+//      overrun again immediately after recovering.
+//
+// *** KNOWN LIMITATION — torn reads with ZC reader + blockOnFull=false ***
+//
+// RecordReaderZC returns a direct pointer into the ring buffer (zero-copy).
+// With blockOnFull=false the writer ignores backpressure and can overwrite
+// pinned ring-buffer slots while the caller is still reading them.  This
+// means consecutive-value guarantees WITHIN a batch do NOT hold.
+//
+// RecordReader is immune to this because it copies the data to its own
+// internal buffer under a shared lock before returning it to the caller.
+//
+// Correctness invariants checked:
+//   - Reader does not hang (completes within the time budget).
+//   - Reader receives at least one full buffer window of records.
+//   - No individual record value is negative (gross corruption check).
+//   NOTE: within-batch consecutiveness is NOT checked here — torn reads
+//         are expected and by-design when blockOnFull=false.
+// =============================================================================
+TEST(OverrunTest, RecordReaderZC_ConcurrentWriter_RepeatedOverrunRecovery) {
+    const int    idVal    = PReg::getID("OvrZCConc_v");
+    RecRule      rule({ PAttr("OvrZCConc_v", DataType::dtInt32) });
+
+    const size_t bufCap   = 10;
+    const size_t batchCap = 5;
+
+    auto buf = std::make_shared<RecBuffer>(rule, bufCap);
+    RecordWriter   writer(buf, batchCap, /*blockOnFull=*/false);
+    RecordReaderZC reader(buf, batchCap);
+
+    using clock = std::chrono::steady_clock;
+    const auto runDuration = std::chrono::milliseconds(500);
+
+    std::atomic<bool>    stopFlag{false};
+    std::atomic<int64_t> writtenCount{0};
+
+    // Writer: runs at full speed for runDuration, ensuring repeated overruns.
+    std::thread producerThread([&] {
+        int64_t counter = 0;
+        while (!stopFlag.load(std::memory_order_relaxed)) {
+            Record r = writer.nextRecord();
+            r.setInt32(idVal, static_cast<int32_t>(counter & 0x7fffffff));
+            writer.commitRecord();
+            ++counter;
+        }
+        writer.flush();
+        writtenCount.store(counter);
+    });
+
+    // Give the writer a head-start so the reader is guaranteed to start overrun.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Consumer: poll for batches until the deadline.
+    size_t batchesReceived = 0;
+    size_t recordsReceived = 0;
+    bool   negativeValue   = false;  // gross corruption: signed bit flipped
+
+    const auto consumerDeadline = clock::now() + runDuration;
+    while (clock::now() < consumerDeadline) {
+        auto batch = reader.nextBatch(batchCap, /*wait=*/false);
+        if (!batch.isValid()) {
+            std::this_thread::yield();
+            continue;
+        }
+
+        ++batchesReceived;
+        for (size_t i = 0; i < batch.count; ++i) {
+            Record rec(batch.rule, const_cast<uint8_t*>(batch.data + i * batch.recordSize));
+            int v = rec.getInt32(idVal);
+            if (v < 0) negativeValue = true;
+        }
+        recordsReceived += batch.count;
+        // NOTE: within-batch consecutiveness is intentionally not checked.
+        // With blockOnFull=false the writer may overwrite the zero-copy pointer
+        // while the caller holds it, producing torn reads.  See test comment.
+    }
+
+    stopFlag.store(true, std::memory_order_relaxed);
+    producerThread.join();
+    reader.stop();
+
+    const int64_t written = writtenCount.load();
+    std::cout << "[OverrunConcZC] written=" << written
+              << " received=" << recordsReceived
+              << " batches=" << batchesReceived << "\n";
+
+    EXPECT_GT(written, 0);
+    ASSERT_GE(recordsReceived, bufCap)
+        << "RecordReaderZC received no records under concurrent overrun — "
+           "possible regression in overrun-recovery or cursor-revert bug";
+    EXPECT_FALSE(negativeValue)
+        << "RecordReaderZC returned a negative value — gross memory corruption";
+}

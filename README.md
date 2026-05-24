@@ -31,6 +31,25 @@ The **CycLib** core library is built around thread safety, zero-copy data paths,
   Consumers (`CsvWriter`, `CbfWriter`, …) and producers (`TcpDataReceiver`, …) pick the strategy with a `UseReader<…>{}` / `UseWriter<…>{}` tag in their constructor; the default is the buffered variant.
 
   > ⚠️ **Writer concurrency:** if more than one producer needs to write into the same `RecBuffer`, use `RecordWriter` for **every** producer. `RecordWriterZC` bypasses the synchronisation that makes multi-writer use safe and must be the **only** writer attached to its buffer.
+
+* **Backpressure & overrun behavior (`blockOnFull`):** Both writer classes accept a `blockOnFull` flag (default `true`).
+
+  | `blockOnFull` | Writer behavior when buffer is full | Reader behavior when it falls behind |
+  |---|---|---|
+  | `true` | Writer stalls until readers free space — no data loss | Readers always see every record; they directly pace the writer |
+  | `false` | Writer overwrites oldest data immediately — never stalls | Readers that lag by more than the buffer capacity are automatically skipped forward to the oldest available record |
+
+  When a reader is skipped forward a warning is emitted via `LOG_WARN` and the count of dropped records is logged. Within a recovered batch all records are always internally consistent (no torn records).
+
+  > ⚠️ **ZC reader + `blockOnFull=false` — torn reads:** `RecordReaderZC` returns a **direct pointer into the ring buffer**. With `blockOnFull=false` the writer ignores backpressure, so it can overwrite the memory the caller is currently reading. This means **data integrity within a batch is not guaranteed** when a ZC reader operates against a non-blocking writer under heavy concurrent load.
+  >
+  > `RecordReader` is immune to this because it **copies** each batch into a private buffer under a shared lock before returning it. Choose the right combination for your use case:
+  >
+  > | | `blockOnFull=true` | `blockOnFull=false` |
+  > |---|---|---|
+  > | **RecordReader** | Safe — writer stalls | Safe — reader skips, copies protect data |
+  > | **RecordReaderZC** | Safe — writer stalls, memory pinned | ⚠️ Torn reads possible under high write load |
+
 * **File I/O & Serialization:** [CbfWriter](CycLib/Cbf/CbfWriter.h) / [CbfReader](CycLib/Cbf/CbfReader.h) for the Cyc Binary Format and [CsvWriter](CycLib/Csv/CsvWriter.h) for CSV. Both operate via background batching.
 * **Networking:** Built on `asio`. [TcpServer](CycLib/Tcp/TcpServer.h) registers buffers under a name (with configurable batch size) and spawns [TcpDataSender](CycLib/Tcp/TcpDataSender.h) sessions; [TcpDataReceiver](CycLib/Tcp/TcpDataReceiver.h) connects, negotiates the `RecRule` schema, and streams records into a local buffer. [TcpServerManager](CycLib/Tcp/TcpServerManager.h) is a singleton that owns one `io_context` + `TcpServer` for the whole process. `unregisterBuffer()` closes the matching sessions when a buffer goes away.
 * **Default constructor + `init()`:** `RecBuffer`, `RecordWriter[ZC]`, `RecordReader[ZC]`, `RecordConsumer`, and `RecordProducer` all support default construction followed by `init()`, so they can be embedded as members and initialised later.
