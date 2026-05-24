@@ -15,10 +15,10 @@ namespace cyc {
 CsvWriter::CsvWriter() = default;
 
 CsvWriter::CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
-                     bool autoStart, size_t batchSize, bool addTimestampSuffix)
+                     bool autoStart, size_t batchSize, bool addTimestampSuffix, size_t maxRecords)
     : CsvWriter()
 {
-    init(filename, buffer, autoStart, batchSize, addTimestampSuffix);
+    init(filename, buffer, autoStart, batchSize, addTimestampSuffix, maxRecords);
 }
 
 CsvWriter::~CsvWriter() {
@@ -42,21 +42,51 @@ void CsvWriter::onConsumeStop() {
     }
 }
 
+void CsvWriter::restart() {
+    m_restartRequested.store(true, std::memory_order_release);
+}
+
+void CsvWriter::rotateFile() {
+    if (m_file.is_open()) {
+        m_file.flush();
+        m_file.close();
+    }
+    m_filename = m_addTimestampSuffix ? createSuffixedFilename(m_baseFilename) : m_baseFilename;
+    m_file.open(m_filename, std::ios::out);
+    if (m_file.is_open()) {
+        m_file << generateHeader() << "\n";
+        m_file.flush();
+        m_file << std::fixed << std::setprecision(6);
+    } else {
+        std::cerr << "CsvWriter: Failed to open file " << m_filename << "\n";
+    }
+    m_recordCount = 0;
+}
+
 void CsvWriter::consumeBatch(const RecordReader::RecordBatch& batch) {
+    if (m_restartRequested.exchange(false, std::memory_order_acq_rel)) {
+        rotateFile();
+    }
+
     if (!m_file.is_open()) return;
 
-    // Fast-path iteration over the memory block
     for (size_t r = 0; r < batch.count; ++r) {
         Record rec(batch.rule, const_cast<uint8_t*>(batch.data + r * batch.recordSize));
 
         for (size_t i = 0; i < m_cachedAttrs.size(); ++i) {
             writeValue(rec, m_cachedAttrs[i]);
-
             if (i < m_cachedAttrs.size() - 1) {
                 m_file << m_delimiter;
             }
         }
         m_file << "\n";
+    }
+
+    if (m_maxRecords > 0) {
+        m_recordCount += batch.count;
+        if (m_recordCount >= m_maxRecords) {
+            rotateFile();
+        }
     }
 }
 

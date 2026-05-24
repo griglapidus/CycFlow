@@ -6,6 +6,7 @@
 
 #include "RecordConsumer.h"
 #include "CbfFile.h"
+#include <atomic>
 
 namespace cyc {
 CYCLIB_SUPPRESS_C4251
@@ -27,12 +28,15 @@ public:
 
     /**
      * @brief Constructs the CBF writer with the default RecordReader (double-buffered).
+     *
+     * @param maxRecords  Rotate to a new file after this many records (0 = disabled).
      */
     CbfWriter(const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true,
               size_t batchSize = 1000,
-              bool addTimestampSuffix = true);
+              bool addTimestampSuffix = true,
+              size_t maxRecords = 0);
 
     /**
      * @brief Constructs the CBF writer with an explicitly chosen reader type.
@@ -44,10 +48,10 @@ public:
     CbfWriter(UseReader<ReaderType>, const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 1000,
-              bool addTimestampSuffix = true)
+              bool addTimestampSuffix = true, size_t maxRecords = 0)
         : CbfWriter()
     {
-        init(UseReader<ReaderType>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
+        init(UseReader<ReaderType>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix, maxRecords);
     }
 
     ~CbfWriter() override;
@@ -63,11 +67,12 @@ public:
      * @param addTimestampSuffix   If @c true, the current local time (with
      *                             millisecond precision) is inserted before the
      *                             extension: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
+     * @param maxRecords           Rotate to a new file after this many records (0 = disabled).
      */
     void init(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 1000,
-              bool addTimestampSuffix = true) {
-        init(UseReader<RecordReader>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
+              bool addTimestampSuffix = true, size_t maxRecords = 0) {
+        init(UseReader<RecordReader>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix, maxRecords);
     }
 
     /**
@@ -81,6 +86,7 @@ public:
      * @param addTimestampSuffix   If @c true, the current local time (with
      *                             millisecond precision) is inserted before the
      *                             extension: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
+     * @param maxRecords           Rotate to a new file after this many records (0 = disabled).
      * @code
      * writer.init(UseReader<RecordReaderZC>{}, "out.cbf", buffer);
      * @endcode
@@ -88,7 +94,11 @@ public:
     template<typename ReaderType>
     void init(UseReader<ReaderType>, const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 1000,
-              bool addTimestampSuffix = true) {
+              bool addTimestampSuffix = true, size_t maxRecords = 0) {
+        m_baseFilename = filename;
+        m_addTimestampSuffix = addTimestampSuffix;
+        m_maxRecords = maxRecords;
+        m_recordCount = 0;
         m_filename = addTimestampSuffix ? createSuffixedFilename(filename) : filename;
         RecordConsumer::init(UseReader<ReaderType>{}, buffer, batchSize);
         if (autoStart) start();
@@ -99,6 +109,15 @@ public:
      * Must be called before the writing begins.
      */
     void setAlias(const std::string& alias);
+
+    /**
+     * @brief Closes the current file and begins writing to a new one.
+     *
+     * Thread-safe: may be called from any thread while the writer is running.
+     * The actual rotation happens at the start of the next batch, so there is
+     * no data loss — all records written before the call land in the old file.
+     */
+    void restart();
 
 protected:
     /**
@@ -117,15 +136,17 @@ protected:
     void onConsumeStop() override;
 
 private:
-    /**
-     * @brief Inserts a local-time timestamp suffix before the extension.
-     * Format: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
-     */
     [[nodiscard]] std::string createSuffixedFilename(const std::string& originalName) const;
+    void rotateFile();
 
+    std::string m_baseFilename;
     std::string m_filename;
+    bool        m_addTimestampSuffix = true;
     std::string m_alias = "Default";
-    CbfFile m_cbfFile;
+    CbfFile     m_cbfFile;
+    size_t      m_maxRecords  = 0;
+    size_t      m_recordCount = 0;
+    std::atomic<bool> m_restartRequested{false};
 };
 
 CYCLIB_RESTORE_C4251

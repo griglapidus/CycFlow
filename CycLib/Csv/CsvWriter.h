@@ -7,6 +7,7 @@
 #include "RecordConsumer.h"
 #include "RecordReaderZC.h"
 #include "Core/PAttr.h"
+#include <atomic>
 #include <fstream>
 
 namespace cyc {
@@ -29,10 +30,12 @@ public:
 
     /**
      * @brief Constructs the CSV writer with the default RecordReader (double-buffered).
+     *
+     * @param maxRecords  Rotate to a new file after this many records (0 = disabled).
      */
     CsvWriter(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 100,
-              bool addTimestampSuffix = true);
+              bool addTimestampSuffix = true, size_t maxRecords = 0);
 
     /**
      * @brief Constructs the CSV writer with an explicitly chosen reader type.
@@ -44,10 +47,10 @@ public:
     CsvWriter(UseReader<ReaderType>, const std::string& filename,
               std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 100,
-              bool addTimestampSuffix = true)
+              bool addTimestampSuffix = true, size_t maxRecords = 0)
         : CsvWriter()
     {
-        init(UseReader<ReaderType>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
+        init(UseReader<ReaderType>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix, maxRecords);
     }
 
     /**
@@ -66,11 +69,12 @@ public:
      * @param addTimestampSuffix   If @c true, the current local time (with
      *                             millisecond precision) is inserted before the
      *                             extension: @c "Foo.csv" → @c "Foo_2026-05-03_19-51-15-022.csv".
+     * @param maxRecords           Rotate to a new file after this many records (0 = disabled).
      */
     void init(const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 100,
-              bool addTimestampSuffix = true) {
-        init(UseReader<RecordReaderZC>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix);
+              bool addTimestampSuffix = true, size_t maxRecords = 0) {
+        init(UseReader<RecordReaderZC>{}, filename, buffer, autoStart, batchSize, addTimestampSuffix, maxRecords);
     }
 
     /**
@@ -84,6 +88,7 @@ public:
      * @param addTimestampSuffix   If @c true, the current local time (with
      *                             millisecond precision) is inserted before the
      *                             extension: @c "Foo.csv" → @c "Foo_2026-05-03_19-51-15-022.csv".
+     * @param maxRecords           Rotate to a new file after this many records (0 = disabled).
      * @code
      * writer.init(UseReader<RecordReader>{}, "out.csv", buffer);
      * @endcode
@@ -91,12 +96,25 @@ public:
     template<typename ReaderType>
     void init(UseReader<ReaderType>, const std::string& filename, std::shared_ptr<RecBuffer> buffer,
               bool autoStart = true, size_t batchSize = 100,
-              bool addTimestampSuffix = true) {
+              bool addTimestampSuffix = true, size_t maxRecords = 0) {
+        m_baseFilename = filename;
+        m_addTimestampSuffix = addTimestampSuffix;
+        m_maxRecords = maxRecords;
+        m_recordCount = 0;
         m_filename = addTimestampSuffix ? createSuffixedFilename(filename) : filename;
         RecordConsumer::init(UseReader<ReaderType>{}, buffer, batchSize);
         m_cachedAttrs = getReader().getRule().getAttributes();
         if (autoStart) start();
     }
+
+    /**
+     * @brief Closes the current file and begins writing to a new one.
+     *
+     * Thread-safe: may be called from any thread while the writer is running.
+     * The actual rotation happens at the start of the next batch, so there is
+     * no data loss — all records written before the call land in the old file.
+     */
+    void restart();
 
 protected:
     /**
@@ -118,36 +136,22 @@ protected:
     void onConsumeStop() override;
 
 private:
-    /**
-     * @brief Formats and writes a single typed field value directly to the stream.
-     * @param rec The record containing the field.
-     * @param attr The attribute metadata describing the field.
-     */
     void writeValue(const Record& rec, const PAttr& attr);
-
-    /**
-     * @brief Prepares the output file for writing (creates new or appends).
-     */
     void setupFile();
-
-    /**
-     * @brief Generates the CSV header line based on the record schema.
-     * @return Formatted header string.
-     */
+    void rotateFile();
     [[nodiscard]] std::string generateHeader() const;
-
-    /**
-     * @brief Generates a unique filename using a timestamp if a header mismatch occurs.
-     * @param originalName The base filename.
-     * @return A new filename appended with the current timestamp.
-     */
     [[nodiscard]] std::string createSuffixedFilename(const std::string& originalName) const;
 
 private:
-    std::string m_filename;
-    std::string m_delimiter = ",";
+    std::string   m_baseFilename;
+    std::string   m_filename;
+    bool          m_addTimestampSuffix = true;
+    std::string   m_delimiter = ",";
     std::ofstream m_file;
     std::vector<PAttr> m_cachedAttrs;
+    size_t        m_maxRecords  = 0;
+    size_t        m_recordCount = 0;
+    std::atomic<bool> m_restartRequested{false};
 };
 
 CYCLIB_RESTORE_C4251
