@@ -1,42 +1,66 @@
 # CycFlow
 
-A C++ framework for collecting, processing, and transmitting streaming data. The project consists of a core library and two Qt6 GUI applications for data visualization and network reception.
+A C++ framework for collecting, processing, and transmitting streaming data. The project consists of a core library (`CycLib`), a reusable Qt6 chart widget (`ChartWidget`), and two Qt6 GUI applications for data visualization and network reception.
 
 ## 📦 Components
 
-* **CycFlow Core:** A thread-safe C++ library providing circular buffers, dynamic record schemas (`RecRule`), and serialization (CBF/CSV). It uses `asio` for networking.
-* **CbfView:** A GUI application built with Qt6 for visualizing data stored in `.cbf` (Cyc Binary Format) files.
-* **CycBufReceiver:** A Qt6 GUI tool for receiving `CycFlow` buffers over a TCP network and visualizing them in real-time.
+* **CycLib (Core):** A thread-safe C++17 library providing dynamic record schemas (`RecRule`), a circular ring buffer (`RecBuffer`), asynchronous and zero-copy reader/writer pipelines, file serialization (CBF/CSV), and TCP streaming built on `asio`.
+* **ChartWidget:** A standalone Qt6 charting component (model/view/delegate, themed header, panning, zoom, cursor) used by both GUI applications.
+* **CbfView:** A Qt6 GUI application for offline viewing of `.cbf` (Cyc Binary Format) files.
+* **CycBufReceiver:** A Qt6 MDI tool that receives `CycFlow` buffers over TCP and visualizes them in real time.
+* **CycTestServer:** A small console application that generates synthetic sensor data and serves it through the singleton `TcpServerManager` — handy for testing `CycBufReceiver`.
 
 ---
 
 ## 🧩 Core Architecture & Modules
 
-The **CycFlow** core library is designed around thread safety and zero-copy data processing.
+The **CycLib** core library is built around thread safety, zero-copy data paths, and a runtime-defined record layout.
 
-* **Memory Management & Dynamic Schema:** Built on top of `RecBuffer` and `CircularBuffer`. Instead of hardcoding C++ structs, `RecRule` defines data layouts at runtime. It uses a Parameter Registry (`PReg`) to cache attribute offsets, providing $O(1)$ field lookups.
-* **Asynchronous Pipelines:** `RecordWriter` and `RecordReader` implement a double-buffering strategy. They allow background threads to prefetch or flush batches of records without locking the main application thread.
-* **File I/O & Serialization:** Includes the Cyc Binary Format (`CbfReader`, `CbfWriter`), and `CsvWriter` for CSV exports. Both operate via background batching.
-* **Networking:** Built on top of `asio`, the network module (`TcpServer`, `TcpDataReceiver`, `TcpDataSender`) handles real-time data streaming and automatic schema negotiation.
+* **Dynamic Schema & Fast Field Access:** Instead of hardcoding C++ structs, [RecRule](CycLib/Core/RecRule.h) defines record layouts at runtime from a list of [PAttr](CycLib/Core/PAttr.h) attributes. Fields are sorted and aligned automatically. A Parameter Registry ([PReg](CycLib/Core/PReg.h)) caches attribute offsets, giving O(1) lookups; the `Record` accessors inline through `RecRule::getOffsetById` so typed gets/sets collapse to a couple of loads + a store.
+* **Bit Fields:** Integer attributes can declare named bits via the `PAttr(name, type, bitDefs)` constructor. Numeric strings in `bitDefs` skip a number of bits, non-numeric strings register a named bit through PReg. Access is via `Record::setBit(id, val)` / `Record::getBit(id)`.
+* **Ring Storage:** [RecBuffer](CycLib/Core/RecBuffer.h) wraps a `DynamicChunkBuffer`, exposes both copy and zero-copy reads, and uses the minimum reader cursor across registered clients as the writer backpressure point.
+* **Writer / Reader Strategies:** A common base interface ([RecordWriterBase](CycLib/RecordWriterBase.h), [RecordReaderBase](CycLib/RecordReaderBase.h)) is implemented by two strategies:
+
+  | Class | Strategy | Concurrency | Use when… |
+  |-------|----------|-------------|-----------|
+  | [RecordWriter](CycLib/RecordWriter.h)   | Double-buffered, async worker thread | **Multi-producer safe** — several writers may target the same `RecBuffer` | Producer must never stall — decouple from buffer backpressure; or several producers share one buffer |
+  | [RecordWriterZC](CycLib/RecordWriterZC.h) | Single-buffered, synchronous, one copy total | **Single-producer only** — must be the sole writer for its `RecBuffer` | Lower latency / simpler flow; caller may block on full buffer |
+  | [RecordReader](CycLib/RecordReader.h)   | Double-buffered, async worker thread | Multiple readers per buffer | Slow consumer (disk I/O, network) — isolate processing time |
+  | [RecordReaderZC](CycLib/RecordReaderZC.h) | Zero-copy, synchronous, direct pointers into the ring | Multiple readers per buffer | Fast consumer (UI, in-process pipeline) |
+
+  Consumers (`CsvWriter`, `CbfWriter`, …) and producers (`TcpDataReceiver`, …) pick the strategy with a `UseReader<…>{}` / `UseWriter<…>{}` tag in their constructor; the default is the buffered variant.
+
+  > ⚠️ **Writer concurrency:** if more than one producer needs to write into the same `RecBuffer`, use `RecordWriter` for **every** producer. `RecordWriterZC` bypasses the synchronisation that makes multi-writer use safe and must be the **only** writer attached to its buffer.
+* **File I/O & Serialization:** [CbfWriter](CycLib/Cbf/CbfWriter.h) / [CbfReader](CycLib/Cbf/CbfReader.h) for the Cyc Binary Format and [CsvWriter](CycLib/Csv/CsvWriter.h) for CSV. Both operate via background batching.
+* **Networking:** Built on `asio`. [TcpServer](CycLib/Tcp/TcpServer.h) registers buffers under a name (with configurable batch size) and spawns [TcpDataSender](CycLib/Tcp/TcpDataSender.h) sessions; [TcpDataReceiver](CycLib/Tcp/TcpDataReceiver.h) connects, negotiates the `RecRule` schema, and streams records into a local buffer. [TcpServerManager](CycLib/Tcp/TcpServerManager.h) is a singleton that owns one `io_context` + `TcpServer` for the whole process. `unregisterBuffer()` closes the matching sessions when a buffer goes away.
+* **Default constructor + `init()`:** `RecBuffer`, `RecordWriter[ZC]`, `RecordReader[ZC]`, `RecordConsumer`, and `RecordProducer` all support default construction followed by `init()`, so they can be embedded as members and initialised later.
 
 ---
 
 ## 🖥️ GUI Applications
 
-The project includes Qt6 desktop applications for data visualization.
-
 ### CycBufReceiver (Network Streaming Viewer)
-A Multi-Document Interface (MDI) viewer that connects to `CycFlow` TCP servers.
-* **Auto-Discovery:** Queries the server for available buffers and their `RecRule` schemas.
-* **Dynamic UI:** Generates plots and data tracks based on the received data types (handling arrays, floats, integers, and timestamps).
+A Multi-Document Interface viewer that connects to one or more `CycFlow` TCP servers.
+
+* **Auto-Discovery:** Queries the server for the list of buffers and their `RecRule` schemas.
+* **Dynamic UI:** Builds plots and data tracks from the received schema — arrays, floats, integers, bit fields, and timestamps are rendered with appropriate value formatters.
+* **Live Mode:** The cursor follows the newest sample as data arrives; toggle off to inspect history.
+* **Chart Controls:** Toolbar buttons for X/Y zoom, right-mouse panning, header context menu, cursor timestamp readout. Updates are throttled by period rather than record count to keep the UI smooth at high data rates. Unified dark / light theming.
+* **Bit-Field Visualization:** Named bits packed into integer parameters are plotted as individual digital tracks.
 
 <img width="1548" height="1028" alt="CycBufReceiver" src="https://github.com/user-attachments/assets/631180b1-cfac-478e-9453-d4ef44cda239" />
-*Real-time visualization of the data generated by the CycFlow server, plotting Counter, Voltage, Current, ADC, and Pressure channels.*
+
+*Real-time visualization of the data generated by `CycTestServer`, plotting Counter, Voltage, Current, ADC, Pressure, and bit-field channels.*
 
 ### CbfView (Binary File Viewer)
-An offline viewer for `.cbf` files. 
+An offline viewer for `.cbf` files.
+
 * Supports OS-level file associations.
-* Allows navigation through datasets recorded during data acquisition sessions.
+* Overlay of multiple graphs and batch data updates for fast loading of long sessions.
+* Shares the same `ChartWidget` rendering and navigation as `CycBufReceiver`.
+
+### CycTestServer
+A console data generator that publishes a multi-channel sensor schema (counter array, named bit register, float / int / double sensor values) on TCP port 5000 via the singleton `TcpServerManager`. Use it together with `CycBufReceiver` to exercise the full pipeline.
 
 ---
 
@@ -45,24 +69,30 @@ An offline viewer for `.cbf` files.
 ### Prerequisites
 * **C++17** compatible compiler.
 * **CMake** 3.14 or higher.
-* **asio** (Downloaded via CMake `FetchContent`).
-* **Qt 6.0+** (Only required for GUI applications. The core library builds without Qt).
+* **asio** — fetched automatically via CMake `FetchContent` (no system install required).
+* **Qt 6.0+** — only required for the GUI applications. The core library and tests build without Qt; if Qt is not detected, the Qt projects are skipped with a warning.
 
 ### Building the Project
 ```bash
-git clone [https://github.com/griglapidus/CycFlow.git](https://github.com/griglapidus/CycFlow.git)
+git clone https://github.com/griglapidus/CycFlow.git
 cd CycFlow
 
-# Configure the project
+# Configure
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 
 # Build everything
 cmake --build build --config Release
 ```
 
+Build artifacts are placed under `build/<Compiler>_<Arch>/{bin,lib,include}/<Config>` so multiple toolchains can coexist in the same source tree.
+
 ### CMake Options
-* `-DBUILD_SHARED_LIBS=ON` — Build the core as a shared library.
-* `-DBUILD_TESTING=ON` — Build the test suite (includes `gtest` unit tests, `ChartViewTest`, and `CycTestServer`).
+* `-DBUILD_SHARED_LIBS=ON` — build the core as a shared library.
+* `-DBUILD_TESTING=ON` — build the test suite (GoogleTest unit tests for Core / CBF / CSV / TCP / zero-copy reader+writer) and `CycTestServer`.
+* `-DCYCLIB_COPY_ASIO_HEADERS=ON` *(default)* — copy fetched asio headers to the install/header destination so downstream consumers can `#include <asio.hpp>` without re-fetching.
+
+### Using CycLib in another CMake project
+`CycLib` can be embedded via `add_subdirectory` or consumed from an install tree via `find_package(CycStruct)` — it exports the `CycStruct::CycLib` target.
 
 ---
 
@@ -71,7 +101,6 @@ cmake --build build --config Release
 The following examples show how to set up a data generator, serve it over TCP, receive it, and save it to disk.
 
 ### 1. Data Source & TCP Server
-Defining a dynamic schema, creating a circular buffer, and streaming data over a TCP connection.
 
 ```cpp
 #include <asio.hpp>
@@ -79,101 +108,99 @@ Defining a dynamic schema, creating a circular buffer, and streaming data over a
 #include "Core/RecBuffer.h"
 #include "Core/RecRule.h"
 #include "Core/PReg.h"
-#include "RecordWriter.h"
-#include "Tcp/TcpServer.h"
+#include "RecordWriterZC.h"
+#include "Tcp/TcpServerManager.h"
 
-// 1. Define the data schema
-std::vector<cyc::PAttr> attrs = {
-    {"Counter",  cyc::DataType::dtInt8,  2}, // Array of 2 elements
-    {"Voltage",  cyc::DataType::dtFloat, 1},
-    {"Pressure", cyc::DataType::dtDouble,1}
+using namespace cyc;
+
+// 1. Define the data schema (plain fields + a bit-field register)
+std::vector<PAttr> attrs = {
+    PAttr("Counter",  DataType::dtInt8,   2),                                  // array of 2
+    PAttr("BitReg",   DataType::dtUInt8,
+          std::vector<std::string>{"txReady", "rxReady", "4", "errFlag"}),     // named bits
+    PAttr("Voltage",  DataType::dtFloat,  1),
+    PAttr("Pressure", DataType::dtDouble, 1),
 };
-cyc::RecRule rule;
+RecRule rule;
 rule.init(attrs);
 
 // Cache attribute IDs for O(1) access
-int idCounter  = cyc::PReg::getID("Counter");
-int idVoltage  = cyc::PReg::getID("Voltage");
-int idPressure = cyc::PReg::getID("Pressure");
+int idCounter  = PReg::getID("Counter");
+int idVoltage  = PReg::getID("Voltage");
+int idPressure = PReg::getID("Pressure");
+int idErr      = PReg::getID("errFlag");
 
-// 2. Create a circular buffer (capacity: 10,000) and a batch writer
-auto buffer = std::make_shared<cyc::RecBuffer>(rule, 10000);
-cyc::RecordWriter writer(buffer, 2000);
+// 2. Create a circular buffer and a zero-copy writer
+auto buffer = std::make_shared<RecBuffer>();
+buffer->init(rule, 10000);
 
-// 3. Start the TCP Server
-asio::io_context io_context;
-cyc::TcpServer server(io_context, 5000);
-server.registerBuffer("SensorStream", buffer);
-server.start();
+RecordWriterZC writer;
+writer.init(buffer, /*batchCapacity*/ 2000);
 
-// Run ASIO event loop in a background thread
-std::thread asioThread([&io_context]() {
-    auto workGuard = asio::make_work_guard(io_context);
-    io_context.run();
-});
+// 3. Start the singleton TCP Server and register the buffer
+auto& mgr = TcpServerManager::instance();
+mgr.start(/*port*/ 5000);
+mgr.server()->registerBuffer("SensorStream", buffer, /*batchSize*/ 500);
 
 // 4. Generate and push data
 while (true) {
-    cyc::Record rec = writer.nextRecord();
-    
-    // Populate the record
-    rec.setInt8(idCounter, 1);       // Index 0
-    rec.setInt8(idCounter, 2, 1);    // Index 1
+    Record rec = writer.nextRecord();
+
+    rec.setInt8(idCounter, 1);          // index 0
+    rec.setInt8(idCounter, 2, 1);       // index 1
     rec.setFloat(idVoltage, 12.5f);
     rec.setDouble(idPressure, 101.3);
-    
+    rec.setBit(idErr, false);
+
     writer.commitRecord();
-    
-    // Flush the batch for network consumers
-    writer.flush();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 ```
 
 ### 2. Receiving Network Streams (Client)
-The data schema (`RecRule`) is automatically negotiated and reconstructed on the client side.
+The schema (`RecRule`) is negotiated automatically and reconstructed on the client.
 
 ```cpp
 #include "Tcp/TcpDataReceiver.h"
-#include "RecordReader.h"
+#include "RecordReaderZC.h"
 
-// 1. Create a receiver with a local buffer capacity of 10,000
-cyc::TcpDataReceiver receiver(10000);
+// Receiver with a local 10 000-record buffer
+cyc::TcpDataReceiver receiver(/*bufferCapacity*/ 10000);
 
-// 2. Connect to the server
 if (receiver.connect("127.0.0.1", 5000, "SensorStream")) {
-    
-    // The receiver fetches data in the background
     auto clientBuffer = receiver.getBuffer();
-    
-    // 3. Read incoming data
-    cyc::RecordReader reader(clientBuffer, 100);
-    cyc::Record rec = reader.nextRecord();
-    
-    if (rec.isValid()) {
-        // Process data...
+
+    // Zero-copy reader — direct pointers into the ring buffer
+    cyc::RecordReaderZC reader;
+    reader.init(clientBuffer, /*batchCapacity*/ 100);
+
+    while (auto batch = reader.nextBatch(100); batch.isValid()) {
+        // Process records in batch.data[0 .. batch.count * batch.recordSize) ...
+        reader.release();   // unpin so the writer can reuse the region
     }
 }
 ```
 
 ### 3. Saving Data to Disk (CBF & CSV)
-Disk writers run in background threads to avoid blocking the main application loop.
+Disk writers run in background threads to avoid blocking the producer.
 
 ```cpp
 #include "Cbf/CbfWriter.h"
 #include "Csv/CsvWriter.h"
+#include "RecordReaderZC.h"
 
-// Save to the Cyc Binary Format (.cbf)
-cyc::CbfWriter cbfWriter("session_data.cbf", buffer, true);
+// Default — buffered RecordReader (good for slow disks)
+cyc::CbfWriter cbfWriter("session_data.cbf", buffer, /*autoStart*/ true);
 cbfWriter.setAlias("TestRun");
 
-// Save to CSV
-cyc::CsvWriter csvWriter("session_data.csv", buffer, true);
+// Pick the zero-copy reader explicitly when the consumer can keep up
+cyc::CsvWriter csvWriter(cyc::UseReader<cyc::RecordReaderZC>{},
+                         "session_data.csv", buffer);
 
-// Wait for the background threads to flush data and close files
+// Wait for the background threads to flush and close the files
 cbfWriter.finish();
 csvWriter.finish();
 ```
 
 ## License
-MIT License
+MIT License — see [LICENSE.txt](LICENSE.txt).

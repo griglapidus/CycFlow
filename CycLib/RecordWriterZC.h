@@ -37,6 +37,11 @@ CYCLIB_SUPPRESS_C4251
  *
  * For high-throughput producers that must never stall see RecordWriter.
  *
+ * @warning **Single-producer only.** RecordWriterZC must be the sole writer
+ * attached to its target RecBuffer. If more than one producer needs to feed
+ * the same buffer, every writer must be a RecordWriter — mixing writer types
+ * or using multiple RecordWriterZC instances on one buffer is unsupported.
+ *
  * @see RecordWriter
  */
 class CYCLIB_EXPORT RecordWriterZC : public RecordWriterBase {
