@@ -28,12 +28,18 @@ RecordReaderZC::~RecordReaderZC() {
 }
 
 void RecordReaderZC::notifyDataAvailable() {
+    // Acquire/release m_mtx to synchronise with a thread that is between
+    // the predicate check and entering the wait state inside cv.wait().
+    // Without this barrier the notify may be lost on stricter cv
+    // implementations (MSVC/SRWLock) and the reader will hang.
+    { std::lock_guard<std::mutex> lock(m_mtx); }
     m_cv.notify_one();
 }
 
 void RecordReaderZC::stop() {
     bool expected = true;
     if (m_running.compare_exchange_strong(expected, false)) {
+        { std::lock_guard<std::mutex> lock(m_mtx); }
         m_cv.notify_all();
         LOG_INFO << "RecordReaderZC stopped: cursor=" << m_readerCursor.load();
     }
@@ -42,6 +48,7 @@ void RecordReaderZC::stop() {
 void RecordReaderZC::finish() {
     m_finishTarget.store(m_target->getTotalWritten(), std::memory_order_relaxed);
     m_finishing.store(true, std::memory_order_release);
+    { std::lock_guard<std::mutex> lock(m_mtx); }
     m_cv.notify_all();
 
     LOG_INFO << "RecordReaderZC::finish: target=" << m_finishTarget.load()

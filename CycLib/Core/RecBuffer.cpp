@@ -133,11 +133,15 @@ void RecBuffer::addClient(IRecBufferClient* client) {
 }
 
 void RecBuffer::removeClient(IRecBufferClient* client) {
-    std::lock_guard<std::mutex> lock(m_syncMtx);
-    auto it = std::find(m_clients.begin(), m_clients.end(), client);
-    if (it != m_clients.end()) {
-        m_clients.erase(it);
+    {
+        std::lock_guard<std::mutex> lock(m_syncMtx);
+        auto it = std::find(m_clients.begin(), m_clients.end(), client);
+        if (it != m_clients.end()) {
+            m_clients.erase(it);
+        }
     }
+    // notifyWriters() re-locks m_syncMtx internally as a memory barrier, so it
+    // must be called only after the lock above has been released.
     notifyWriters();
 }
 
@@ -154,6 +158,11 @@ void RecBuffer::waitForSpace(const std::function<bool()>& stopCondition) {
 }
 
 void RecBuffer::notifyWriters() {
+    // Acquire/release m_syncMtx to synchronise with a writer that is between
+    // the predicate evaluation and entering the wait state inside waitForSpace().
+    // Without this barrier the notify can be missed on stricter cv
+    // implementations (MSVC/SRWLock) and the writer will hang.
+    { std::lock_guard<std::mutex> lock(m_syncMtx); }
     m_spaceCv.notify_all();
 }
 

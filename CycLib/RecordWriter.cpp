@@ -39,6 +39,11 @@ RecordWriter::~RecordWriter() {
 void RecordWriter::shutdownWorker() {
     flush(); // Ensure all remaining data is saved before stopping
     m_running.store(false, std::memory_order_release);
+    // Acquire/release m_mtx to synchronise with a worker that is between the
+    // predicate check and entering the wait state inside cv.wait(). Without
+    // this barrier the notify can be lost and the worker hangs in cv.wait
+    // forever, causing m_worker.join() below to block indefinitely.
+    { std::lock_guard<std::mutex> lock(m_mtx); }
     m_cv.notify_all();
 
     if (m_worker.joinable()) {

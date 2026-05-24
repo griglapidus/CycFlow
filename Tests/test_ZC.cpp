@@ -120,13 +120,13 @@ void runFieldReadWriteThroughput(bool align, const char* label)
                 rec.setInt8  (idU8,  static_cast<uint8_t >(counter));
                 rec.setInt16 (idI16, static_cast<int16_t >(counter));
                 rec.setInt32 (idI32, static_cast<int32_t >(counter));
+                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 0);
                 rec.setInt32 (idU32, static_cast<uint32_t>(counter), 1);
-                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 3);
                 rec.setInt64 (idI64, static_cast<int64_t >(counter));
+                rec.setFloat (idFlt, static_cast<float   >(counter), 0);
                 rec.setFloat (idFlt, static_cast<float   >(counter), 1);
-                rec.setFloat (idFlt, static_cast<float   >(counter), 2);
+                rec.setDouble(idDbl, static_cast<double  >(counter), 0);
                 rec.setDouble(idDbl, static_cast<double  >(counter), 1);
-                rec.setDouble(idDbl, static_cast<double  >(counter), 2);
                 ++counter;
             }
             recWriter.commitBatch(batch.capacity);
@@ -244,13 +244,13 @@ void runConcurrentFieldReadWriteThroughput(bool align, const char* label)
                 rec.setInt8  (idU8,  static_cast<uint8_t >(counter));
                 rec.setInt16 (idI16, static_cast<int16_t >(counter));
                 rec.setInt32 (idI32, static_cast<int32_t >(counter));
+                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 0);
                 rec.setInt32 (idU32, static_cast<uint32_t>(counter), 1);
-                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 3);
                 rec.setInt64 (idI64, static_cast<int64_t >(counter));
+                rec.setFloat (idFlt, static_cast<float   >(counter), 0);
                 rec.setFloat (idFlt, static_cast<float   >(counter), 1);
-                rec.setFloat (idFlt, static_cast<float   >(counter), 2);
+                rec.setDouble(idDbl, static_cast<double  >(counter), 0);
                 rec.setDouble(idDbl, static_cast<double  >(counter), 1);
-                rec.setDouble(idDbl, static_cast<double  >(counter), 2);
                 ++counter;
             }
             recWriter.commitBatch(batch.capacity);
@@ -496,13 +496,13 @@ BatchSweepResult measureBatchPoint(
                 rec.setInt8  (idU8,  static_cast<uint8_t >(counter));
                 rec.setInt16 (idI16, static_cast<int16_t >(counter));
                 rec.setInt32 (idI32, static_cast<int32_t >(counter));
+                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 0);
                 rec.setInt32 (idU32, static_cast<uint32_t>(counter), 1);
-                rec.setInt32 (idU32, static_cast<uint32_t>(counter), 3);
                 rec.setInt64 (idI64, static_cast<int64_t >(counter));
+                rec.setFloat (idFlt, static_cast<float   >(counter), 0);
                 rec.setFloat (idFlt, static_cast<float   >(counter), 1);
-                rec.setFloat (idFlt, static_cast<float   >(counter), 2);
+                rec.setDouble(idDbl, static_cast<double  >(counter), 0);
                 rec.setDouble(idDbl, static_cast<double  >(counter), 1);
-                rec.setDouble(idDbl, static_cast<double  >(counter), 2);
                 ++counter;
             }
             recWriter.commitBatch(batch.capacity);
