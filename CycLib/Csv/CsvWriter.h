@@ -140,7 +140,6 @@ private:
     void setupFile();
     void rotateFile();
     [[nodiscard]] std::string generateHeader() const;
-    [[nodiscard]] std::string createSuffixedFilename(const std::string& originalName) const;
 
 private:
     std::string   m_baseFilename;

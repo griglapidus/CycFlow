@@ -4,6 +4,7 @@
 #ifndef CYC_LOGGER_H
 #define CYC_LOGGER_H
 
+#include "Common.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -165,12 +166,7 @@ public:
                       now.time_since_epoch()) % 1000;
 
         // Thread-safe localtime resolution
-        std::tm tm_snapshot;
-#ifdef _WIN32
-        localtime_s(&tm_snapshot, &time);
-#else
-        localtime_r(&time, &tm_snapshot);
-#endif
+        std::tm tm_snapshot = safeLocaltime(time);
 
         m_buffer << "[" << std::put_time(&tm_snapshot, "%T")
                  << "." << std::setfill('0') << std::setw(3) << ms.count() << "] ";

@@ -5,6 +5,8 @@
 #define CYC_COMMON_H
 
 #include <cstdint>
+#include <ctime>
+#include <string>
 #include "CycLib_global.h"
 
 namespace cyc {
@@ -51,6 +53,28 @@ CYCLIB_EXPORT double get_current_epoch_time();
 const char* dataTypeToString(DataType t);
 
 DataType dataTypeFromString(const char* str);
+
+/**
+ * @brief Inserts a current-local-time suffix (millisecond precision) before
+ * the file extension.
+ *
+ * Example: @c "Foo.cbf" → @c "Foo_2026-05-03_19-51-15-022.cbf".
+ * If the name has no extension, the suffix is appended at the end.
+ */
+CYCLIB_EXPORT std::string createSuffixedFilename(const std::string& originalName);
+
+/**
+ * @brief Thread-safe wrapper around @c localtime_s (Windows) / @c localtime_r (POSIX).
+ */
+inline std::tm safeLocaltime(std::time_t t) {
+    std::tm buf{};
+#if defined(_WIN32) || defined(_WIN64)
+    localtime_s(&buf, &t);
+#else
+    localtime_r(&t, &buf);
+#endif
+    return buf;
+}
 
 } // namespace cyc
 

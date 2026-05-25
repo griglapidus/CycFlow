@@ -2,11 +2,7 @@
 // Copyright (c) 2026 Grigorii Lapidus
 
 #include "CbfWriter.h"
-#include <chrono>
-#include <ctime>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 
 namespace cyc {
 
@@ -27,33 +23,6 @@ CbfWriter::~CbfWriter() {
     stop();
 }
 
-std::string CbfWriter::createSuffixedFilename(const std::string &originalName) const {
-    using namespace std::chrono;
-    const auto now = system_clock::now();
-    const auto t   = system_clock::to_time_t(now);
-    const auto ms  = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
-
-    std::tm buf;
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&buf, &t);
-#else
-    localtime_r(&t, &buf);
-#endif
-
-    char timeStr[32];
-    std::strftime(timeStr, sizeof(timeStr), "_%Y-%m-%d_%H-%M-%S", &buf);
-
-    std::ostringstream ss;
-    ss << timeStr << '-' << std::setw(3) << std::setfill('0') << ms.count();
-    const std::string suffix = ss.str();
-
-    size_t dotPos = originalName.find_last_of('.');
-    if (dotPos != std::string::npos && dotPos > 0) {
-        return originalName.substr(0, dotPos) + suffix + originalName.substr(dotPos);
-    }
-    return originalName + suffix;
-}
-
 void CbfWriter::setAlias(const std::string& alias) {
     m_alias = alias;
 }
@@ -62,10 +31,7 @@ void CbfWriter::restart() {
     m_restartRequested.store(true, std::memory_order_release);
 }
 
-void CbfWriter::rotateFile() {
-    m_cbfFile.close();
-    m_filename = m_addTimestampSuffix ? createSuffixedFilename(m_baseFilename) : m_baseFilename;
-
+void CbfWriter::openAndWriteHeader() {
     if (!m_cbfFile.open(m_filename, CbfMode::Write)) {
         std::cerr << "CbfWriter: Failed to open file " << m_filename << std::endl;
         return;
@@ -83,30 +49,17 @@ void CbfWriter::rotateFile() {
         m_cbfFile.close();
         return;
     }
+}
+
+void CbfWriter::rotateFile() {
+    m_cbfFile.close();
+    m_filename = m_addTimestampSuffix ? createSuffixedFilename(m_baseFilename) : m_baseFilename;
+    openAndWriteHeader();
     m_recordCount = 0;
 }
 
 void CbfWriter::onConsumeStart() {
-    if (!m_cbfFile.open(m_filename, CbfMode::Write)) {
-        std::cerr << "CbfWriter: Failed to open file " << m_filename << std::endl;
-        return;
-    }
-
-    m_cbfFile.setAlias(m_alias);
-
-    const RecRule& rule = getReader().getRule();
-
-    if (!m_cbfFile.writeHeader(rule)) {
-        std::cerr << "CbfWriter: Failed to write RecRule header" << std::endl;
-        m_cbfFile.close();
-        return;
-    }
-
-    if (!m_cbfFile.beginDataSection()) {
-        std::cerr << "CbfWriter: Failed to begin data section" << std::endl;
-        m_cbfFile.close();
-        return;
-    }
+    openAndWriteHeader();
 }
 
 void CbfWriter::consumeBatch(const RecordReader::RecordBatch& batch) {

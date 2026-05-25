@@ -4,6 +4,9 @@
 #include "Common.h"
 #include <chrono>
 #include <cstring>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 namespace cyc {
 
@@ -69,6 +72,28 @@ DataType dataTypeFromString(const char* str) {
     if (strcmp(str, "Double") == 0) return DataType::dtDouble;
     if (strcmp(str, "Ptr") == 0) return DataType::dtPtr;
     return DataType::dtUndefine;
+}
+
+std::string createSuffixedFilename(const std::string& originalName) {
+    using namespace std::chrono;
+    const auto now = system_clock::now();
+    const auto t   = system_clock::to_time_t(now);
+    const auto ms  = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::tm buf = safeLocaltime(t);
+
+    char timeStr[32];
+    std::strftime(timeStr, sizeof(timeStr), "_%Y-%m-%d_%H-%M-%S", &buf);
+
+    std::ostringstream ss;
+    ss << timeStr << '-' << std::setw(3) << std::setfill('0') << ms.count();
+    const std::string suffix = ss.str();
+
+    size_t dotPos = originalName.find_last_of('.');
+    if (dotPos != std::string::npos && dotPos > 0) {
+        return originalName.substr(0, dotPos) + suffix + originalName.substr(dotPos);
+    }
+    return originalName + suffix;
 }
 
 }

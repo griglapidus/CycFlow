@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Get-ChildItem -Path c:\\\\work\\\\CycStruct\\\\Tests -Recurse -File | ForEach-Object { $_.FullName.Replace\\('c:\\\\work\\\\CycStruct\\\\', ''\\) })",
-      "PowerShell(& 'C:\\\\work\\\\CycStruct\\\\build\\\\MSVC_x64\\\\bin\\\\Release\\\\CycTests.exe' --gtest_filter='AlignModes/ZCBatchSweepTest.Writer_ReaderZC_BatchSweep/Packed' --gtest_color=no 2>&1 | Select-Object -Last 5; \"Exit code: $LASTEXITCODE\")",
-      "PowerShell(& 'C:\\\\work\\\\CycStruct\\\\build\\\\MSVC_x64\\\\bin\\\\Release\\\\CycTests.exe' --gtest_filter='AlignModes/ZCBatchSweepTest.WriterZC_Reader_BatchSweep/Packed' --gtest_color=no 2>&1 | Select-Object -Last 5; \"Exit code: $LASTEXITCODE\")"
-    ]
-  }
-}

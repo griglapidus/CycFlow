@@ -136,8 +136,8 @@ protected:
     void onConsumeStop() override;
 
 private:
-    [[nodiscard]] std::string createSuffixedFilename(const std::string& originalName) const;
     void rotateFile();
+    void openAndWriteHeader();
 
     std::string m_baseFilename;
     std::string m_filename;
