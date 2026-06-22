@@ -873,7 +873,10 @@ TEST(RecRuleTest, PackedLayoutUnchanged) {
 // Correctness properties checked:
 //   - Reader produces at least bufCap valid records within a time budget.
 //   - All received values are within [0, total).
-//   - Consecutive records are monotonically increasing (no corruption).
+//   - Records within a single batch are consecutive (no torn reads / corruption).
+//   - Records are monotonically increasing across batches.  Gaps between batches
+//     are expected and correct: a non-blocking writer that overruns the reader
+//     causes the reader to skip overwritten records.
 TEST(OverrunTest, RecordReader_NonBlockingWriter_RecoverAfterOverrun) {
     const int    idVal    = PReg::getID("OvrRR_v");
     RecRule      rule({ PAttr("OvrRR_v", DataType::dtInt32) });
@@ -902,6 +905,8 @@ TEST(OverrunTest, RecordReader_NonBlockingWriter_RecoverAfterOverrun) {
     const auto deadline = clock::now() + std::chrono::seconds(10);
 
     // Spin until we have collected at least bufCap records or timeout expires.
+    // Records within a batch must be strictly consecutive (a gap there means a
+    // torn read); gaps between batches are legitimate overrun skips.
     while (static_cast<int>(received.size()) < static_cast<int>(bufCap)
            && clock::now() < deadline) {
         auto batch = reader.nextBatch(batchCap, /*wait=*/false);
@@ -909,9 +914,17 @@ TEST(OverrunTest, RecordReader_NonBlockingWriter_RecoverAfterOverrun) {
             std::this_thread::yield();
             continue;
         }
+        int prev = -1;
         for (size_t i = 0; i < batch.count; ++i) {
             Record rec(batch.rule, const_cast<uint8_t*>(batch.data + i * batch.recordSize));
-            received.push_back(rec.getInt32(idVal));
+            int v = rec.getInt32(idVal);
+            if (prev >= 0) {
+                EXPECT_EQ(v, prev + 1)
+                    << "non-consecutive records within a batch at index " << i
+                    << " (prev=" << prev << " curr=" << v << ") — torn read";
+            }
+            prev = v;
+            received.push_back(v);
         }
     }
 
@@ -926,9 +939,11 @@ TEST(OverrunTest, RecordReader_NonBlockingWriter_RecoverAfterOverrun) {
         EXPECT_GE(v, 0)     << "record value below valid range";
         EXPECT_LT(v, total) << "record value above valid range";
     }
+    // Across batches the reader may skip overwritten records after an overrun,
+    // so only monotonic increase (no duplicates, no going backwards) is required.
     for (size_t i = 1; i < received.size(); ++i) {
-        EXPECT_EQ(received[i], received[i - 1] + 1)
-            << "non-consecutive records at index " << i
+        EXPECT_GT(received[i], received[i - 1])
+            << "records not monotonically increasing at index " << i
             << " (prev=" << received[i - 1] << " curr=" << received[i] << ")";
     }
 }
