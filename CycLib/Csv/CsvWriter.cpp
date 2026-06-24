@@ -66,7 +66,10 @@ void CsvWriter::consumeBatch(const RecordReader::RecordBatch& batch) {
         rotateFile();
     }
 
-    if (!m_file.is_open()) return;
+    // Bail out once the stream has failed (disk full, I/O error, etc.) instead of
+    // silently dropping every subsequent record: is_open() stays true after failbit
+    // is set, so without this check every later <<  would be a silent no-op.
+    if (!m_file.is_open() || !m_file.good()) return;
 
     for (size_t r = 0; r < batch.count; ++r) {
         Record rec(batch.rule, const_cast<uint8_t*>(batch.data + r * batch.recordSize));
@@ -78,6 +81,11 @@ void CsvWriter::consumeBatch(const RecordReader::RecordBatch& batch) {
             }
         }
         m_file << "\n";
+    }
+
+    if (!m_file.good()) {
+        std::cerr << "CsvWriter: write failed for file " << m_filename
+                   << ", further records will be dropped until restart()\n";
     }
 
     if (m_maxRecords > 0) {
