@@ -207,11 +207,16 @@ public:
             std::cout << msg;
         }
 
-        // Write to per-process log file
+        // Write to per-process log file. Only flush eagerly for Error/Warning,
+        // where surviving a crash matters; Info/Debug/Trace (the high-volume,
+        // hot-path levels) rely on std::ofstream's normal buffering instead of
+        // paying a disk sync on every call.
         auto& mgr = LogFileManager::instance();
         if (mgr.isOpen()) {
             mgr.stream() << msg;
-            mgr.stream().flush();
+            if (m_level <= LogLevel::Warning) {
+                mgr.stream().flush();
+            }
         }
     }
 
