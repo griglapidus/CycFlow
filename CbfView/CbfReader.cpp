@@ -48,7 +48,7 @@ void CbfReader::process()
 
     while (file.readSectionHeader(header)) {
 
-        if (header.type == static_cast<uint8_t>(cyc::CbfSectionType::Header)) {
+        if (header.type == static_cast<uint8_t>(cyc::CbfSectionType::Schema)) {
             if (file.readRule(header, rule)) {
                 hasRule = true;
 

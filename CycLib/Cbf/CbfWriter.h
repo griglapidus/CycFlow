@@ -121,7 +121,7 @@ public:
 
 protected:
     /**
-     * @brief Prepares the file, writes the header and opens the data section.
+     * @brief Prepares the file, writes the schema and opens the data section.
      */
     void onConsumeStart() override;
 
@@ -137,7 +137,7 @@ protected:
 
 private:
     void rotateFile();
-    void openAndWriteHeader();
+    void openAndWriteSchema();
 
     std::string m_baseFilename;
     std::string m_filename;

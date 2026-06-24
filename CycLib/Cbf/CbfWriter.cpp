@@ -31,7 +31,7 @@ void CbfWriter::restart() {
     m_restartRequested.store(true, std::memory_order_release);
 }
 
-void CbfWriter::openAndWriteHeader() {
+void CbfWriter::openAndWriteSchema() {
     if (!m_cbfFile.open(m_filename, CbfMode::Write)) {
         std::cerr << "CbfWriter: Failed to open file " << m_filename << std::endl;
         return;
@@ -39,8 +39,8 @@ void CbfWriter::openAndWriteHeader() {
     m_cbfFile.setAlias(m_alias);
 
     const RecRule& rule = getReader().getRule();
-    if (!m_cbfFile.writeHeader(rule)) {
-        std::cerr << "CbfWriter: Failed to write RecRule header" << std::endl;
+    if (!m_cbfFile.writeSchema(rule)) {
+        std::cerr << "CbfWriter: Failed to write RecRule schema" << std::endl;
         m_cbfFile.close();
         return;
     }
@@ -54,12 +54,12 @@ void CbfWriter::openAndWriteHeader() {
 void CbfWriter::rotateFile() {
     m_cbfFile.close();
     m_filename = m_addTimestampSuffix ? createSuffixedFilename(m_baseFilename) : m_baseFilename;
-    openAndWriteHeader();
+    openAndWriteSchema();
     m_recordCount = 0;
 }
 
 void CbfWriter::onConsumeStart() {
-    openAndWriteHeader();
+    openAndWriteSchema();
 }
 
 void CbfWriter::consumeBatch(const RecordReader::RecordBatch& batch) {

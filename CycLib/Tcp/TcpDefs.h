@@ -37,6 +37,12 @@ struct TcpHeader {
 };
 #pragma pack(pop)
 
+/// Maximum payload accepted by MessageUtils::receiveMessage() for control-plane
+/// messages (buffer list, RecRule schema, request strings). Bounds the allocation
+/// driven by the untrusted on-wire payloadSize field. Data-batch streaming uses its
+/// own caller-supplied capacity check instead and is unaffected by this limit.
+constexpr uint32_t kMaxControlPayloadSize = 16u * 1024u * 1024u;
+
 CYCLIB_RESTORE_C4251
 } // namespace cyc
 

@@ -46,9 +46,9 @@ public:
     void setAlias(const std::string& alias);
 
     /**
-     * @brief Writes a Header section containing the given RecRule.
+     * @brief Writes a Schema section containing the given RecRule.
      */
-    bool writeHeader(const RecRule& rule);
+    bool writeSchema(const RecRule& rule);
 
     /**
      * @brief Starts a Data section. The length is initially 0 and updated in endDataSection().
@@ -82,7 +82,7 @@ public:
     bool readSectionHeader(CbfSectionHeader& header);
 
     /**
-     * @brief Reads a Header section body and reconstructs a RecRule.
+     * @brief Reads a Schema section body and reconstructs a RecRule.
      */
     bool readRule(const CbfSectionHeader& header, RecRule& outRule);
 

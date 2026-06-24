@@ -59,6 +59,10 @@ public:
         }
 
         if (header.payloadSize > 0) {
+            if (header.payloadSize > kMaxControlPayloadSize) {
+                ec = asio::error::make_error_code(asio::error::message_size);
+                return false;
+            }
             payload.resize(header.payloadSize);
             asio::read(socket, asio::buffer(payload), ec);
             if (ec) return false;

@@ -43,7 +43,7 @@ RecRule CbfReader::defineRule() {
     RecRule rule;
 
     while (m_cbfFile.readSectionHeader(header)) {
-        if (header.type == static_cast<uint8_t>(CbfSectionType::Header)) {
+        if (header.type == static_cast<uint8_t>(CbfSectionType::Schema)) {
             if (m_cbfFile.readRule(header, rule)) {
                 m_recordSize = rule.getRecSize();
                 m_valid = (m_recordSize > 0);

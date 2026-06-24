@@ -55,13 +55,13 @@ void CbfFile::setAlias(const std::string& alias) {
 
 // --- Write Implementation ---
 
-bool CbfFile::writeHeader(const RecRule& rule) {
+bool CbfFile::writeSchema(const RecRule& rule) {
     if (m_mode != CbfMode::Write || !m_file.is_open()) return false;
 
     std::string ruleText = rule.toText();
 
     CbfSectionHeader header;
-    header.type = static_cast<uint8_t>(CbfSectionType::Header);
+    header.type = static_cast<uint8_t>(CbfSectionType::Schema);
     std::strncpy(header.name, m_alias.c_str(), sizeof(header.name) - 1);
     header.bodyLength = static_cast<int64_t>(ruleText.size());
 
@@ -136,15 +136,15 @@ bool CbfFile::readSectionHeader(CbfSectionHeader& header) {
 }
 
 bool CbfFile::readRule(const CbfSectionHeader& header, RecRule& outRule) {
-    if (header.bodyLength <= 0) return false;
-
-    std::string schemaText;
-    schemaText.resize(header.bodyLength);
-
-    m_file.read(&schemaText[0], header.bodyLength);
-    if (m_file.gcount() != header.bodyLength) return false;
+    if (header.bodyLength <= 0 || header.bodyLength > CBF_MAX_SCHEMA_BODY_LENGTH) return false;
 
     try {
+        std::string schemaText;
+        schemaText.resize(header.bodyLength);
+
+        m_file.read(&schemaText[0], header.bodyLength);
+        if (m_file.gcount() != header.bodyLength) return false;
+
         outRule = RecRule::fromText(schemaText);
         return true;
     } catch (...) {

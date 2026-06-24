@@ -52,7 +52,7 @@ TEST_F(CbfFileTest, WriteAndReadCycle) {
 
         std::string myAlias = "Engine_1";
         writer.setAlias(myAlias);
-        ASSERT_TRUE(writer.writeHeader(writeRule));
+        ASSERT_TRUE(writer.writeSchema(writeRule));
         ASSERT_TRUE(writer.beginDataSection());
 
         std::vector<uint8_t> buffer(writeRule.getRecSize());
@@ -83,9 +83,9 @@ TEST_F(CbfFileTest, WriteAndReadCycle) {
 
         CbfSectionHeader header;
 
-        // Read Header Section
+        // Read Schema Section
         ASSERT_TRUE(reader.readSectionHeader(header));
-        EXPECT_EQ(header.type, static_cast<uint8_t>(CbfSectionType::Header));
+        EXPECT_EQ(header.type, static_cast<uint8_t>(CbfSectionType::Schema));
         EXPECT_STREQ(header.name, "Engine_1");
 
         RecRule readRule;
@@ -296,7 +296,7 @@ TEST_F(CbfWriterIntegrationTest, ProducerConsumerCycle) {
 
     CbfSectionHeader header;
     ASSERT_TRUE(reader.readSectionHeader(header));
-    EXPECT_EQ(header.type, static_cast<uint8_t>(CbfSectionType::Header));
+    EXPECT_EQ(header.type, static_cast<uint8_t>(CbfSectionType::Schema));
     EXPECT_STREQ(header.name, alias.c_str());
 
     RecRule readRule;
