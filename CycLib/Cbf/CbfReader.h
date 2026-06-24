@@ -6,6 +6,7 @@
 
 #include "RecordProducer.h"
 #include "CbfFile.h"
+#include <atomic>
 
 namespace cyc {
 CYCLIB_SUPPRESS_C4251
@@ -65,7 +66,7 @@ private:
     std::string m_filename;
     CbfFile m_cbfFile;
     size_t m_recordSize;
-    bool m_valid;
+    std::atomic<bool> m_valid;
     int64_t m_dataBytesRemaining;
 };
 
