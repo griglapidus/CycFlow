@@ -6,6 +6,8 @@
 
 #include "CircularBuffer.h"
 
+#include <atomic>
+
 namespace cyc {
 
 /**

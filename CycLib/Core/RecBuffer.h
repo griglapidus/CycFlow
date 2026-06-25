@@ -11,6 +11,8 @@
 #include "Record.h"
 #include <condition_variable>
 #include <functional>
+#include <shared_mutex>
+#include <mutex>
 
 namespace cyc {
 CYCLIB_SUPPRESS_C4251
