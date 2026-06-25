@@ -131,7 +131,12 @@ public:
     /**
      * @brief Appends typed samples to a single series.
      *
-     * Thread-safe; may be called from a background thread.
+     * @warning Must be called on the model's (UI) thread — see the
+     * "Thread safety" section above. The method takes no lock; calling it
+     * from a worker thread is a contract violation (Debug: assert,
+     * Release: UB / data race on the series buffers).  Being a template,
+     * it cannot be a queued slot; to feed data from a worker thread, build
+     * a SeriesBatch and deliver it to appendBatch() via a queued connection.
      *
      * @tparam T  Must match the type used when the series was created.
      */
@@ -139,10 +144,16 @@ public:
     void appendData(const QString &name, const QVector<T> &samples);
 
     /**
-     * @brief Appends samples to multiple series in a single lock acquisition.
+     * @brief Appends samples to multiple series in a single call.
      *
-     * Thread-safe; preferred over repeated appendData() calls when updating
-     * several series at once.
+     * Preferred over repeated appendData() calls when updating several
+     * series at once.
+     *
+     * @warning Must be called on the model's (UI) thread (see the
+     * "Thread safety" section above); it takes no lock.  This is the
+     * designated cross-thread entry point: connect a worker signal carrying
+     * QList<SeriesBatch> to this slot with Qt::QueuedConnection so Qt's
+     * event loop marshals the call onto the UI thread.
      */
     void appendBatch(const QList<SeriesBatch> &batch);
 
