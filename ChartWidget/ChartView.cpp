@@ -450,6 +450,11 @@ void ChartView::paintEvent(QPaintEvent *event)
     const int visTop    = vscroll;
     const int visBottom = vscroll + vpH;
 
+    // The chart column width is identical for every row in this paint pass;
+    // chartPixelWidth() scans all series (via maxSampleCount), so compute it
+    // once here instead of per row inside the loop.
+    const int colW = m_chartModel->chartPixelWidth();
+
     // Pass 2: draw signal data for each visible row.
     for (int r = 0; r < m_chartModel->rowCount(); ++r) {
         const ChartSeries *s    = m_chartModel->series(r);
@@ -458,7 +463,7 @@ void ChartView::paintEvent(QPaintEvent *event)
         if (rowY > visBottom + rowH) break;
 
         if (s && rowY + rowH > visTop && rowY < visBottom) {
-            const QRect cell(0, rowY, m_chartModel->chartPixelWidth(), rowH);
+            const QRect cell(0, rowY, colW, rowH);
             p.save();
             m_delegate->paintData(&p, cell, *s, cursor, pps, clipXLeft, clipXRight);
             p.restore();
