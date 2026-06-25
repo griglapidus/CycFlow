@@ -19,8 +19,8 @@ std::vector<std::string> TcpServiceClient::requestBufferList(const std::string& 
     auto endpoints = resolver.resolve(host, std::to_string(port), ec);
     if (ec) return {};
 
-    asio::connect(socket, endpoints, ec);
-    if (ec) return {};
+    if (!connectWithTimeout(io_context, socket, endpoints, ec)) return {};
+    applySocketTimeout(socket);
 
     // Send the request (ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL)
     if (!MessageUtils::sendMessage(socket, MessageType::RequestBufferList, "", ec)) {
@@ -61,8 +61,8 @@ std::string TcpServiceClient::requestRecRule(const std::string& host, uint16_t p
     auto endpoints = resolver.resolve(host, std::to_string(port), ec);
     if (ec) return "";
 
-    asio::connect(socket, endpoints, ec);
-    if (ec) return "";
+    if (!connectWithTimeout(io_context, socket, endpoints, ec)) return "";
+    applySocketTimeout(socket);
 
     // Send the request (ИСПОЛЬЗУЕМ ВОЗВРАТ BOOL)
     if (!MessageUtils::sendMessage(socket, MessageType::RequestRecRule, bufferName, ec)) {

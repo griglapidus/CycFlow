@@ -64,6 +64,11 @@ void TcpServer::handleClient(asio::ip::tcp::socket socket) {
     std::vector<uint8_t> payload;
     asio::error_code ec;
 
+    // Bound how long a client can hold this thread/socket without sending a
+    // complete request (slow-loris protection); persists on the socket, so
+    // the handed-over TcpDataSender session inherits it too.
+    applySocketTimeout(socket);
+
     // Wait for the initial request
     if (!MessageUtils::receiveMessage(socket, header, payload, ec)) {
         return;

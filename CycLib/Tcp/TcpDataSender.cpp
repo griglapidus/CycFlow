@@ -11,6 +11,9 @@ TcpDataSender::TcpDataSender(std::shared_ptr<RecBuffer> buffer, size_t readerBat
     : RecordConsumer(buffer, readerBatchSize)
     , m_socket(std::move(socket))
 {
+    // Idempotent if TcpServer::handleClient already set it on this socket;
+    // guards direct construction (e.g. tests) against an unbounded read/write.
+    applySocketTimeout(m_socket);
 }
 
 TcpDataSender::~TcpDataSender() {

@@ -6,6 +6,7 @@
 
 #include "Core/CycLib_global.h"
 #include "RecordConsumer.h"
+#include "TcpDefs.h"
 #include <asio.hpp>
 
 namespace cyc {
@@ -34,6 +35,7 @@ public:
                   size_t readerBatchSize, asio::ip::tcp::socket socket)
         : m_socket(std::move(socket))
     {
+        applySocketTimeout(m_socket);
         init(UseReader<ReaderType>{}, buffer, readerBatchSize);
     }
     ~TcpDataSender() override;

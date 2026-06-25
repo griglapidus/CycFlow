@@ -32,11 +32,11 @@ bool TcpDataReceiver::connect(const std::string& host, uint16_t port, const std:
         return false;
     }
 
-    asio::connect(m_socket, endpoints, ec);
-    if (ec) {
+    if (!connectWithTimeout(m_ioContext, m_socket, endpoints, ec)) {
         std::cerr << "TcpDataReceiver: Connect failed: " << ec.message() << "\n";
         return false;
     }
+    applySocketTimeout(m_socket);
 
     // Handshake
     if (!MessageUtils::sendMessage(m_socket, MessageType::RequestDataStream, bufferName, ec)) {
