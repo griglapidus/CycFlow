@@ -343,6 +343,15 @@ void ChartModel::setCursorSample(int sampleIndex)
     Q_ASSERT(thread() == QThread::currentThread());
     if (m_cursor == sampleIndex) return;
     m_cursor = sampleIndex;
+    // DO NOT "optimise" this away. This dataChanged() forces QTableView to
+    // repaint the full visible cells on every cursor move. It looks redundant
+    // next to ChartView::repaintCursorStrip(), but it is NOT: the cursor dot
+    // (radius up to ~5px + outline + AA, see ChartDelegate) is wider than the
+    // strip repainted by repaintCursorStrip() (stripW = max(4, pps+2)), so the
+    // narrow update alone leaves a ghost ring of the old dot at low/normal pps.
+    // Removing this line was tried (commit 25ed206) and reverted (commit
+    // 028611b "Fixed chart cursor render"). To drop it safely you must first
+    // widen the strip to fully cover the cursor dot extent.
     if (!m_order.isEmpty())
         emit dataChanged(index(0,0), index(m_order.size()-1,0), {CursorSampleRole});
     emit cursorMoved(sampleIndex);
